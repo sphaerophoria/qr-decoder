@@ -1,3 +1,6 @@
+const types_2d = @import("types_2d.zig");
+const Rect = types_2d.Rect;
+
 const c = @cImport({
     @cInclude("stb_image.h");
 });
@@ -26,6 +29,22 @@ pub fn isLightIter(it: anytype) IsLightIter(@TypeOf(it)) {
     return .{
         .it = it,
     };
+}
+
+pub fn isLightRoi(roi: *const Rect, image: *Image) bool {
+    var start_y: usize = @intFromFloat(@ceil(roi.top));
+    var end_y: usize = @intFromFloat(@floor(roi.bottom));
+    var start_x: usize = @intFromFloat(@ceil(roi.left));
+    var end_x: usize = @intFromFloat(@floor(roi.right));
+
+    var val: usize = 0;
+    for (start_y..end_y) |y| {
+        for (start_x..end_x) |x| {
+            val += image.get(x, y);
+        }
+    }
+
+    return val > 128 * (end_y - start_y) * (end_x - start_x);
 }
 
 pub const HorizIter = struct {
@@ -98,6 +117,10 @@ pub const Image = struct {
 
     pub fn deinit(self: *Image) void {
         c.stbi_image_free(self.data);
+    }
+
+    pub fn get(self: *Image, x: usize, y: usize) u8 {
+        return self.data[y * self.width + x];
     }
 
     pub fn row(self: *Image, y: usize) HorizIter {

@@ -1,98 +1,346 @@
 const std = @import("std");
 const img = @import("img.zig");
 const vis = @import("visualizer.zig");
+const types_2d = @import("types_2d.zig");
+const Rect = types_2d.Rect;
+const Image = img.Image;
 
 const Allocator = std.mem.Allocator;
 
+const FinderCandidate1D = struct {
+    center: f32,
+    length: f32,
+};
+
+const DetectFinderAlgoState = union(enum) {
+    detect_vert_candidates,
+    detect_horiz_candidates: struct {
+        vert_candidates: std.ArrayList(Rect),
+    },
+    detect_combined_candidates: struct {
+        vert_candidates: std.ArrayList(Rect),
+        horiz_candidates: std.ArrayList(Rect),
+    },
+    rois: struct {
+        candidates: std.ArrayList(std.ArrayList(Rect)),
+    },
+    finished: std.ArrayList(Rect),
+};
+
+/// Helper state machine for detecting QR finder segments. This may seem a
+/// little odd, but we want to extract the internal state at different stages
+/// of the algorithm. "Why don't you just split out functions?" you might ask,
+/// well when we want to use this in normal usage vs debugging, we'd have to
+/// duplicate the stitching of functions to a point where I didn't want to.
+/// This is arguably worse, arguably better. Deal with it
+pub const DetectFinderAlgo = struct {
+    // All internal state is managed by the arena to avoid worrying about
+    // deiniting intermediate output
+    arena: std.heap.ArenaAllocator,
+    output_alloc: Allocator,
+    image: *img.Image,
+    state: DetectFinderAlgoState,
+
+    pub const Output = union(enum) {
+        vert_candidates: []const Rect,
+        horiz_candidates: []const Rect,
+        combined_candidates: []const std.ArrayList(Rect),
+        rois: []const Rect,
+    };
+
+    pub fn init(alloc: Allocator, image: *img.Image) DetectFinderAlgo {
+        return .{
+            .arena = std.heap.ArenaAllocator.init(alloc),
+            .output_alloc = alloc,
+            .image = image,
+            .state = .detect_vert_candidates,
+        };
+    }
+
+    pub fn deinit(self: *DetectFinderAlgo) void {
+        self.arena.deinit();
+    }
+
+    fn detectVertCandidates(self: *DetectFinderAlgo) !?Output {
+        var vertical_candidates = std.ArrayList(Rect).init(self.arena.allocator());
+
+        for (0..self.image.width) |x| {
+            var candidates = try finderCandidates(self.arena.allocator(), self.image.col(x));
+            defer candidates.deinit();
+
+            for (candidates.items) |candidate| {
+                var cx = @as(f32, @floatFromInt(x)) + 0.5;
+                try vertical_candidates.append(Rect.initCenterSize(cx, candidate.center, 0.0, candidate.length));
+            }
+        }
+
+        self.state = .{ .detect_horiz_candidates = .{
+            .vert_candidates = vertical_candidates,
+        } };
+
+        return .{
+            .vert_candidates = vertical_candidates.items,
+        };
+    }
+
+    fn detectHorizCandidates(self: *DetectFinderAlgo) !?Output {
+        var horizontal_candidates = std.ArrayList(Rect).init(self.arena.allocator());
+
+        for (0..self.image.height) |y| {
+            var candidates = try finderCandidates(self.arena.allocator(), self.image.row(y));
+            defer candidates.deinit();
+
+            for (candidates.items) |candidate| {
+                var cy = @as(f32, @floatFromInt(y)) + 0.5;
+                try horizontal_candidates.append(Rect.initCenterSize(candidate.center, cy, candidate.length, 0));
+            }
+        }
+
+        const vertical_candidates = self.state.detect_horiz_candidates.vert_candidates;
+
+        self.state = .{ .detect_combined_candidates = .{
+            .vert_candidates = vertical_candidates,
+            .horiz_candidates = horizontal_candidates,
+        } };
+
+        return .{
+            .horiz_candidates = horizontal_candidates.items,
+        };
+    }
+
+    fn detectCombinedCandidates(self: *DetectFinderAlgo) !?Output {
+        var buckets = std.ArrayList(std.ArrayList(Rect)).init(self.arena.allocator());
+        var vert_candidates = self.state.detect_combined_candidates.vert_candidates;
+        var horiz_candidates = self.state.detect_combined_candidates.horiz_candidates;
+
+        for (vert_candidates.items) |vert_candidate| {
+            for (horiz_candidates.items) |horiz_candidate| {
+                if (rectCentersEql(&vert_candidate, &horiz_candidate, 1.0)) {
+                    var cx = (vert_candidate.cx() + horiz_candidate.cx()) / 2.0;
+                    var cy = (vert_candidate.cy() + horiz_candidate.cy()) / 2.0;
+                    var width = horiz_candidate.width();
+                    var height = vert_candidate.height();
+
+                    var combined = Rect.initCenterSize(cx, cy, width, height);
+
+                    try addRectToBucket(&buckets, combined);
+                }
+            }
+        }
+
+        self.state = .{ .rois = .{
+            .candidates = buckets,
+        } };
+
+        return .{
+            .combined_candidates = buckets.items,
+        };
+    }
+
+    pub fn detectRois(self: *DetectFinderAlgo) !?Output {
+        var buckets = self.state.rois.candidates;
+
+        var ret = std.ArrayList(Rect).init(self.output_alloc);
+        errdefer ret.deinit();
+
+        for (buckets.items) |bucket| {
+            var cx: f32 = 0;
+            var cy: f32 = 0;
+            var width: f32 = 0;
+            var height: f32 = 0;
+
+            for (bucket.items) |rect| {
+                cx += rect.cx();
+                cy += rect.cy();
+                width += rect.width();
+                height += rect.height();
+            }
+
+            try ret.append(Rect.initCenterSize(
+                cx / @as(f32, @floatFromInt(bucket.items.len)),
+                cy / @as(f32, @floatFromInt(bucket.items.len)),
+                width / @as(f32, @floatFromInt(bucket.items.len)),
+                height / @as(f32, @floatFromInt(bucket.items.len)),
+            ));
+        }
+
+        self.state = .{
+            .finished = ret,
+        };
+
+        return .{
+            .rois = ret.items,
+        };
+    }
+
+    pub fn step(self: *DetectFinderAlgo) !?Output {
+        switch (self.state) {
+            .detect_vert_candidates => {
+                return self.detectVertCandidates();
+            },
+            .detect_horiz_candidates => {
+                return self.detectHorizCandidates();
+            },
+            .detect_combined_candidates => {
+                return self.detectCombinedCandidates();
+            },
+            .rois => {
+                return self.detectRois();
+            },
+            .finished => {
+                return null;
+            },
+        }
+    }
+};
+
+fn addRectToBucket(buckets: *std.ArrayList(std.ArrayList(Rect)), rect: Rect) !void {
+    for (buckets.items) |*bucket| {
+        for (bucket.items) |bucket_rect| {
+            if (rectCentersEql(&bucket_rect, &rect, 10.0)) {
+                try bucket.append(rect);
+                return;
+            }
+        }
+    }
+
+    try buckets.append(std.ArrayList(Rect).init(buckets.allocator));
+    try buckets.items[buckets.items.len - 1].append(rect);
+}
+
 /// Find potential pixel positions for the center of the qr finder pattern in 1 dimension.
-pub fn finderCandidates(alloc: Allocator, rle: []const RleItem) !std.ArrayList(usize) {
-    var ret = std.ArrayList(usize).init(alloc);
-    if (rle.len < 5) {
+pub fn finderCandidates(alloc: Allocator, it: anytype) !std.ArrayList(FinderCandidate1D) {
+    var is_light_it = img.isLightIter(it);
+    var rle = try runLengthEncode(alloc, &is_light_it);
+    defer rle.deinit();
+
+    var ret = std.ArrayList(FinderCandidate1D).init(alloc);
+    errdefer ret.deinit();
+
+    if (rle.items.len < 5) {
         return ret;
     }
 
-    const end = rle.len - 5;
+    const end = rle.items.len - 5;
     for (0..end) |i| {
-        const ref = rle[i].length;
+        const ref = rle.items[i].length;
         // FIXME: Allow for any amount of error
-        if (rle[i + 1].length != ref) {
+        if (rle.items[i + 1].length != ref) {
             continue;
         }
 
-        if (rle[i + 2].length / ref != 3) {
+        if (rle.items[i + 2].length / ref != 3) {
             continue;
         }
 
-        if (rle[i + 3].length != ref) {
+        if (rle.items[i + 3].length != ref) {
             continue;
         }
 
-        if (rle[i + 4].length != ref) {
+        if (rle.items[i + 4].length != ref) {
             continue;
         }
 
-        try ret.append(rle[i + 2].start + rle[i + 2].length / 2);
+        const center_block_length: f32 = @floatFromInt(rle.items[i + 2].length);
+        const center_block_start: f32 = @floatFromInt(rle.items[i + 2].start);
+        var center = center_block_start + center_block_length / 2;
+
+        try ret.append(.{
+            .center = center,
+            .length = @floatFromInt(ref * 7),
+        });
     }
 
     return ret;
 }
 
-/// Look for the center of QR code finder patterns and draw them with the visualizer
-pub fn findFinderPatterns(alloc: Allocator, image: *img.Image, visualizer: anytype) !void {
-    const Point = struct {
-        x: usize,
-        y: usize,
+fn rectCentersEql(a: *const Rect, b: *const Rect, tolerance: f32) bool {
+    return std.math.approxEqAbs(f32, a.cx(), b.cx(), tolerance) and std.math.approxEqAbs(f32, a.cy(), b.cy(), tolerance);
+}
+
+pub fn findFinderPatterns(alloc: Allocator, image: *img.Image) !std.ArrayList(Rect) {
+    var algo = DetectFinderAlgo.init(alloc, image);
+    // NOTE: finished state is not deinitialized
+    defer algo.deinit();
+
+    while (try algo.step()) |_| {}
+    return algo.state.finished;
+}
+
+pub const QrCode = struct {
+    roi: Rect,
+    elem_width: f32,
+    elem_height: f32,
+
+    pub const HorizTimingIter = struct {
+        qr_code: *const QrCode,
+        x_pos: f32,
+
+        const Self = @This();
+
+        fn init(qr_code: *const QrCode) HorizTimingIter {
+            return .{
+                .qr_code = qr_code,
+                .x_pos = qr_code.roi.left + 7 * qr_code.elem_width,
+            };
+        }
+
+        pub fn next(self: *Self) ?Rect {
+            if (self.x_pos >= self.qr_code.roi.right - 7 * self.qr_code.elem_width) {
+                return null;
+            }
+
+            const y_pos = self.qr_code.roi.top + 6 * self.qr_code.elem_height;
+
+            const timing_rect: Rect = .{
+                .left = self.x_pos,
+                .top = y_pos,
+                .right = self.x_pos + self.qr_code.elem_width,
+                .bottom = y_pos + self.qr_code.elem_height,
+            };
+
+            self.x_pos += self.qr_code.elem_width;
+            return timing_rect;
+        }
     };
 
-    var vertical_candidates = std.ArrayList(Point).init(alloc);
-    defer vertical_candidates.deinit();
+    pub fn init(alloc: Allocator, image: *Image) !QrCode {
+        var finders = try findFinderPatterns(alloc, image);
+        defer finders.deinit();
 
-    for (0..image.width) |x| {
-        var it = img.isLightIter(image.col(x));
-        var rle = try runLengthEncode(alloc, &it);
-        defer rle.deinit();
+        var qr_rect = Rect{
+            .top = std.math.floatMax(f32),
+            .bottom = 0,
+            .left = std.math.floatMax(f32),
+            .right = 0,
+        };
 
-        var candidates = try finderCandidates(alloc, rle.items);
-        defer candidates.deinit();
+        var elem_width: f32 = 0;
+        var elem_height: f32 = 0;
 
-        for (candidates.items) |candidate| {
-            try vertical_candidates.append(.{
-                .x = x,
-                .y = candidate,
-            });
-            try visualizer.drawCircle(@floatFromInt(x), @floatFromInt(candidate), 1, "blue");
+        for (finders.items) |rect| {
+            elem_width += rect.width() / 7;
+            elem_height += rect.height() / 7;
+            qr_rect.top = @min(qr_rect.top, rect.top);
+            qr_rect.bottom = @max(qr_rect.bottom, rect.bottom);
+            qr_rect.left = @min(qr_rect.left, rect.left);
+            qr_rect.right = @max(qr_rect.right, rect.right);
         }
+
+        elem_width /= @floatFromInt(finders.items.len);
+        elem_height /= @floatFromInt(finders.items.len);
+
+        return .{
+            .roi = qr_rect,
+            .elem_width = elem_width,
+            .elem_height = elem_height,
+        };
     }
 
-    var horizontal_candidates = std.ArrayList(Point).init(alloc);
-    defer horizontal_candidates.deinit();
-
-    for (0..image.height) |y| {
-        var it = img.isLightIter(image.row(y));
-
-        var rle = try runLengthEncode(alloc, &it);
-        defer rle.deinit();
-
-        var candidates = try finderCandidates(alloc, rle.items);
-        defer candidates.deinit();
-
-        for (candidates.items) |candidate| {
-            try horizontal_candidates.append(.{
-                .x = candidate,
-                .y = y,
-            });
-            try visualizer.drawCircle(@floatFromInt(candidate), @floatFromInt(y), 1, "red");
-        }
+    pub fn horizTimings(self: *const QrCode) HorizTimingIter {
+        return HorizTimingIter.init(self);
     }
-
-    for (vertical_candidates.items) |vert_candidate| {
-        for (horizontal_candidates.items) |horiz_candidate| {
-            if (std.meta.eql(vert_candidate, horiz_candidate)) {
-                try visualizer.drawCircle(@floatFromInt(horiz_candidate.x), @floatFromInt(horiz_candidate.y), 4, "green");
-            }
-        }
-    }
-}
+};
 
 const RleItem = struct {
     start: usize,

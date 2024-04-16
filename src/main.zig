@@ -4,6 +4,8 @@ const Allocator = std.mem.Allocator;
 const img = @import("img.zig");
 const vis = @import("visualizer.zig");
 const qr = @import("qr.zig");
+const types_2d = @import("types_2d.zig");
+const Rect = types_2d.Rect;
 
 const ArgsHelper = struct {
     it: std.process.ArgIterator,
@@ -87,6 +89,43 @@ const Args = struct {
     }
 };
 
+fn visualizeFinderState(alloc: Allocator, image: *img.Image, visualizer: anytype) !void {
+    var detector_finder_algo = qr.DetectFinderAlgo.init(alloc, image);
+    defer {
+        switch (detector_finder_algo.state) {
+            .finished => |v| v.deinit(),
+            else => {},
+        }
+        detector_finder_algo.deinit();
+    }
+
+    while (try detector_finder_algo.step()) |item| {
+        switch (item) {
+            .vert_candidates => |candidates| {
+                for (candidates) |candidate| {
+                    try visualizer.drawCircle(candidate.cx(), candidate.cy(), 0.5, "blue");
+                }
+            },
+            .horiz_candidates => |candidates| {
+                for (candidates) |candidate| {
+                    try visualizer.drawCircle(candidate.cx(), candidate.cy(), 0.5, "red");
+                }
+            },
+            .combined_candidates => |buckets| {
+                for (buckets) |bucket| {
+                    for (bucket.items) |candidate| {
+                        try visualizer.drawCircle(candidate.cx(), candidate.cy(), 0.5, "green");
+                    }
+                }
+            },
+            .rois => |rois| {
+                for (rois) |roi| {
+                    try visualizer.drawBox(roi, "yellow");
+                }
+            },
+        }
+    }
+}
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{
         .stack_trace_frames = 99,
@@ -101,10 +140,27 @@ pub fn main() !void {
     defer image.deinit();
 
     var svg_file = try std.fs.cwd().createFile(args.output, .{});
+    defer svg_file.close();
+
     var visualizer = try vis.Visualizer(@TypeOf(svg_file.writer())).init(alloc, svg_file.writer(), image.width, image.height, args.input);
     defer visualizer.finish() catch {};
 
-    try qr.findFinderPatterns(alloc, &image, &visualizer);
+    try visualizeFinderState(alloc, &image, &visualizer);
+
+    var qr_code = try qr.QrCode.init(alloc, &image);
+    try visualizer.drawBox(qr_code.roi, "red");
+
+    var timing_it = qr_code.horizTimings();
+    var expected = true;
+
+    while (timing_it.next()) |timing_rect| {
+        try visualizer.drawBox(timing_rect, "red");
+
+        if (img.isLightRoi(&timing_rect, &image) != expected) {
+            std.debug.panic("Unexpected timing value", .{});
+        }
+        expected = !expected;
+    }
 }
 
 test {

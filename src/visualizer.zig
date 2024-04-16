@@ -1,6 +1,8 @@
 const std = @import("std");
 const xml = @import("xml.zig");
+const types_2d = @import("types_2d.zig");
 const Allocator = std.mem.Allocator;
+const Rect = types_2d.Rect;
 
 pub fn Visualizer(comptime Writer: type) type {
     return struct {
@@ -41,6 +43,17 @@ pub fn Visualizer(comptime Writer: type) type {
             try self.svg_builder.addAttributeNum("cy", cy);
             try self.svg_builder.addAttributeNum("r", r);
             try self.svg_builder.addAttribute("fill", fill);
+            try self.svg_builder.finishNode();
+        }
+
+        pub fn drawBox(self: *Self, rect: Rect, stroke: []const u8) !void {
+            try self.svg_builder.addNode("rect");
+            try self.svg_builder.addAttributeNum("x", rect.left);
+            try self.svg_builder.addAttributeNum("y", rect.top);
+            try self.svg_builder.addAttributeNum("width", rect.width());
+            try self.svg_builder.addAttributeNum("height", rect.height());
+            try self.svg_builder.addAttribute("fill", "none");
+            try self.svg_builder.addAttribute("stroke", stroke);
             try self.svg_builder.finishNode();
         }
     };
