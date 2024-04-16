@@ -48,12 +48,13 @@ pub fn Visualizer(comptime Writer: type) type {
 
         pub fn drawBox(self: *Self, rect: Rect, stroke: []const u8) !void {
             try self.svg_builder.addNode("rect");
-            try self.svg_builder.addAttributeNum("x", rect.left);
-            try self.svg_builder.addAttributeNum("y", rect.top);
+            try self.svg_builder.addAttributeNum("x", rect.left + 0.5);
+            try self.svg_builder.addAttributeNum("y", rect.top + 0.5);
             try self.svg_builder.addAttributeNum("width", rect.width());
             try self.svg_builder.addAttributeNum("height", rect.height());
             try self.svg_builder.addAttribute("fill", "none");
             try self.svg_builder.addAttribute("stroke", stroke);
+            try self.svg_builder.addAttributeNum("stroke-width", 0.5);
             try self.svg_builder.finishNode();
         }
     };
