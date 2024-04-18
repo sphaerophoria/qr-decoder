@@ -43,6 +43,19 @@ pub fn XmlBuilder(comptime Writer: type) type {
             self.state = .attribute;
         }
 
+        pub fn addData(self: *Self, data: []const u8) XmlError!void {
+            switch (self.state) {
+                .other => {},
+                else => {
+                    std.log.err("Cannot add node while in {any} state", .{self.state});
+                    return XmlError.InvalidState;
+                },
+            }
+
+            try self.insertIndent();
+            try self.writer.print("{s}\n", .{data});
+        }
+
         fn checkAttributeState(self: *const Self) XmlError!void {
             switch (self.state) {
                 .attribute => {},
@@ -81,7 +94,7 @@ pub fn XmlBuilder(comptime Writer: type) type {
                         return XmlError.InvalidState;
                     };
                     try self.insertIndent();
-                    try self.writer.print("</{s}>", .{tag});
+                    try self.writer.print("</{s}>\n", .{tag});
                 },
             }
         }
@@ -92,7 +105,6 @@ pub fn XmlBuilder(comptime Writer: type) type {
             while (self.tag_stack.items.len > 0) {
                 try self.finishNode();
             }
-            try self.writer.writeByte('\n');
         }
 
         fn insertIndent(self: *Self) XmlError!void {
@@ -122,11 +134,19 @@ test "xml sanity test" {
     try xml_builder.addAttribute("key3", "val");
     try xml_builder.finishNode();
 
+    try xml_builder.addNode("child2");
+    try xml_builder.finishAttributes();
+    try xml_builder.addData("hello");
+    try xml_builder.finishNode();
+
     try xml_builder.finish();
 
     const expected =
         \\<root key1="test" key2="3.5" >
         \\	<child key3="val" />
+        \\	<child2 >
+        \\		hello
+        \\	</child2>
         \\</root>
         \\
     ;

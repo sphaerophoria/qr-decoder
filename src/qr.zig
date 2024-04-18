@@ -300,6 +300,120 @@ pub const HorizTimingIter = struct {
     }
 };
 
+pub const DataIter = struct {
+    qr_code: *const QrCode,
+    x_pos: i32,
+    y_pos: i32,
+    moving_vertically: bool,
+    movement_direction: i2,
+
+    const Self = @This();
+
+    pub fn init(qr_code: *const QrCode) Self {
+        return .{
+            .qr_code = qr_code,
+            // Initial position is off the bottom edge, because next()
+            // unconditionally does a movement. Set it up so that the first zig
+            // zag starts us in the bottom right corner
+            .x_pos = @intCast(qr_code.grid_width - 2),
+            .y_pos = @intCast(qr_code.grid_height),
+            .moving_vertically = true,
+            .movement_direction = -1,
+        };
+    }
+
+    pub fn next(self: *Self) ?Rect {
+        // Qr code data iteration is not super trivial. We follow a zig zag
+        // pattern along a 2 block wide column. Starting in the bottom right,
+        // and moving up.
+        //
+        // If we hit a finder pattern, or the edge of the QR code, we have to
+        // turn around
+        //
+        // If we hit an alignment pattern or a timing pattern we have to skip
+        // over it, preserving the zig zag motion. Note that if the alignment
+        // pattern does not align with the 2 block column, we have to consume
+        // the blocks that it does not cover. AFAICT, just continuing the zig
+        // zag while we are in the "skippable" sections preserves the correct
+        // behavior
+
+        while (true) {
+            const last_move_vertical = self.moving_vertically;
+            self.doZigZag();
+
+            self.doTurnAround(last_move_vertical) catch {
+                return null;
+            };
+
+            if (!shouldSkip(self.x_pos, self.y_pos)) {
+                break;
+            }
+        }
+
+        return self.qr_code.idxToRoi(@intCast(self.x_pos), @intCast(self.y_pos));
+    }
+
+    fn doZigZag(self: *Self) void {
+        if (self.moving_vertically) {
+            self.x_pos += 1;
+            self.y_pos += self.movement_direction;
+        } else {
+            self.x_pos -= 1;
+        }
+
+        self.moving_vertically = !self.moving_vertically;
+    }
+
+    fn doTurnAround(self: *Self, last_move_vertical: bool) !void {
+        if (!self.shouldTurnAround(self.x_pos, self.y_pos)) {
+            return;
+        }
+
+        if (!last_move_vertical) {
+            std.log.err("Do not know how to handle horizontal out of bounds", .{});
+            return error.Unimplemented;
+        }
+
+        self.x_pos -= 2;
+        self.y_pos -= self.movement_direction;
+        self.movement_direction *= -1;
+        self.moving_vertically = false;
+    }
+
+    fn shouldSkip(x: i32, y: i32) bool {
+        return x == timer_pattern_offset or y == timer_pattern_offset;
+    }
+
+    fn shouldTurnAround(self: *const Self, x: i32, y: i32) bool {
+        const x_left_of_left_finder = x < finder_num_elements + 2;
+        const y_above_top_finder = y < finder_num_elements + 2;
+
+        const in_tl_finder = x_left_of_left_finder and y_above_top_finder;
+        if (in_tl_finder) {
+            return true;
+        }
+
+        const y_below_bottom_finder = y >= self.qr_code.grid_height - finder_num_elements - 1;
+        const in_bl_finder = x_left_of_left_finder and y_below_bottom_finder;
+        if (in_bl_finder) {
+            return true;
+        }
+
+        const x_right_of_right_finder = x > self.qr_code.grid_width - finder_num_elements - 1;
+        const in_tr_finder = x_right_of_right_finder and y_above_top_finder;
+        if (in_tr_finder) {
+            return true;
+        }
+
+        const out_of_bounds = x >= self.qr_code.grid_width or x < 0 or y >= self.qr_code.grid_height or y < 0;
+        if (out_of_bounds) {
+            return true;
+        }
+
+        return false;
+    }
+};
+
 pub const QrCode = struct {
     roi: Rect,
     elem_width: f32,
@@ -358,6 +472,10 @@ pub const QrCode = struct {
 
     pub fn horizTimings(self: *const QrCode) HorizTimingIter {
         return HorizTimingIter.init(self);
+    }
+
+    pub fn data(self: *const QrCode) DataIter {
+        return DataIter.init(self);
     }
 };
 

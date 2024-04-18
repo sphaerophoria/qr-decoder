@@ -7,6 +7,8 @@ const Rect = types_2d.Rect;
 pub fn Visualizer(comptime Writer: type) type {
     return struct {
         svg_builder: xml.XmlBuilder(Writer),
+        stroke_width: f32,
+        font_size: f32,
 
         const Self = @This();
 
@@ -30,6 +32,8 @@ pub fn Visualizer(comptime Writer: type) type {
 
             return .{
                 .svg_builder = svg_builder,
+                .stroke_width = @as(f32, @floatFromInt(width)) / 1000.0,
+                .font_size = @as(f32, @floatFromInt(width)) / 50.0,
             };
         }
 
@@ -54,6 +58,21 @@ pub fn Visualizer(comptime Writer: type) type {
             try self.svg_builder.addAttributeNum("height", rect.height());
             try self.svg_builder.addAttribute("fill", "none");
             try self.svg_builder.addAttribute("stroke", stroke);
+            try self.svg_builder.finishNode();
+        }
+
+        pub fn drawText(self: *Self, x: f32, y: f32, color: []const u8, text: []const u8) !void {
+            // <text x="20" y="35" stroke="red" stroke-width="0.1" fill="red" font-size="2">1</text>
+            try self.svg_builder.addNode("text");
+            try self.svg_builder.addAttributeNum("x", x);
+            try self.svg_builder.addAttributeNum("y", y);
+            try self.svg_builder.addAttributeNum("stroke-width", self.stroke_width);
+            try self.svg_builder.addAttribute("fill", color);
+            try self.svg_builder.addAttribute("stroke", color);
+            try self.svg_builder.addAttributeNum("font-size", self.font_size);
+            try self.svg_builder.finishAttributes();
+            try self.svg_builder.addData(text);
+
             try self.svg_builder.finishNode();
         }
     };

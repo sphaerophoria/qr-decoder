@@ -161,6 +161,20 @@ pub fn main() !void {
         }
         expected = !expected;
     }
+
+    var data_it = qr_code.data();
+    var i: usize = 0;
+    while (data_it.next()) |roi| {
+        if (i >= 200) {
+            return;
+        }
+        try visualizer.drawBox(roi, "orange");
+        var i_s = try std.fmt.allocPrint(alloc, "{d}", .{i});
+        defer alloc.free(i_s);
+
+        try visualizer.drawText(roi.left + qr_code.elem_width / 3.0, roi.bottom - qr_code.elem_height / 3.0, "red", i_s);
+        i += 1;
+    }
 }
 
 test {
