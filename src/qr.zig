@@ -362,9 +362,7 @@ pub const DataIter = struct {
         // behavior
 
         while (true) {
-            const last_move_vertical = self.moving_vertically;
-            self.doZigZag();
-
+            const last_move_vertical = self.doZigZag();
             self.doTurnAround(last_move_vertical) catch {
                 return null;
             };
@@ -377,7 +375,7 @@ pub const DataIter = struct {
         return self.qr_code.idxToRoi(@intCast(self.x_pos), @intCast(self.y_pos));
     }
 
-    fn doZigZag(self: *Self) void {
+    fn doZigZag(self: *Self) bool {
         if (self.moving_vertically) {
             self.x_pos += 1;
             self.y_pos += self.movement_direction;
@@ -386,6 +384,7 @@ pub const DataIter = struct {
         }
 
         self.moving_vertically = !self.moving_vertically;
+        return !self.moving_vertically;
     }
 
     fn doTurnAround(self: *Self, last_move_vertical: bool) !void {
