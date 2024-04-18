@@ -267,42 +267,42 @@ pub fn findFinderPatterns(alloc: Allocator, image: *img.Image) !std.ArrayList(Re
     return algo.state.finished;
 }
 
+pub const HorizTimingIter = struct {
+    qr_code: *const QrCode,
+    x_pos: f32,
+
+    const Self = @This();
+
+    fn init(qr_code: *const QrCode) HorizTimingIter {
+        return .{
+            .qr_code = qr_code,
+            .x_pos = qr_code.roi.left + 7 * qr_code.elem_width,
+        };
+    }
+
+    pub fn next(self: *Self) ?Rect {
+        if (self.x_pos >= self.qr_code.roi.right - 7 * self.qr_code.elem_width) {
+            return null;
+        }
+
+        const y_pos = self.qr_code.roi.top + 6 * self.qr_code.elem_height;
+
+        const timing_rect: Rect = .{
+            .left = self.x_pos,
+            .top = y_pos,
+            .right = self.x_pos + self.qr_code.elem_width,
+            .bottom = y_pos + self.qr_code.elem_height,
+        };
+
+        self.x_pos += self.qr_code.elem_width;
+        return timing_rect;
+    }
+};
+
 pub const QrCode = struct {
     roi: Rect,
     elem_width: f32,
     elem_height: f32,
-
-    pub const HorizTimingIter = struct {
-        qr_code: *const QrCode,
-        x_pos: f32,
-
-        const Self = @This();
-
-        fn init(qr_code: *const QrCode) HorizTimingIter {
-            return .{
-                .qr_code = qr_code,
-                .x_pos = qr_code.roi.left + 7 * qr_code.elem_width,
-            };
-        }
-
-        pub fn next(self: *Self) ?Rect {
-            if (self.x_pos >= self.qr_code.roi.right - 7 * self.qr_code.elem_width) {
-                return null;
-            }
-
-            const y_pos = self.qr_code.roi.top + 6 * self.qr_code.elem_height;
-
-            const timing_rect: Rect = .{
-                .left = self.x_pos,
-                .top = y_pos,
-                .right = self.x_pos + self.qr_code.elem_width,
-                .bottom = y_pos + self.qr_code.elem_height,
-            };
-
-            self.x_pos += self.qr_code.elem_width;
-            return timing_rect;
-        }
-    };
 
     pub fn init(alloc: Allocator, image: *Image) !QrCode {
         var finders = try findFinderPatterns(alloc, image);
