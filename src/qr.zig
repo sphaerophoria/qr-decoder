@@ -247,7 +247,7 @@ pub fn finderCandidates(alloc: Allocator, it: anytype) !std.ArrayList(FinderCand
 
         try ret.append(.{
             .center = center,
-            .length = @floatFromInt(ref * 7),
+            .length = @floatFromInt(ref * finder_num_elements),
         });
     }
 
@@ -267,35 +267,36 @@ pub fn findFinderPatterns(alloc: Allocator, image: *img.Image) !std.ArrayList(Re
     return algo.state.finished;
 }
 
+const finder_num_elements: usize = 7;
+// Vertical offset for horizontal pattern, horizontal offset for vertical pattern
+// Aligns with last row of finder
+const timer_pattern_offset: usize = finder_num_elements - 1;
+// Horizontal position for horizontal pattern, element directly after finder
+// pattern
+const timer_pattern_start: usize = finder_num_elements;
+
 pub const HorizTimingIter = struct {
     qr_code: *const QrCode,
-    x_pos: f32,
+    x_pos: usize,
 
     const Self = @This();
 
     fn init(qr_code: *const QrCode) HorizTimingIter {
         return .{
             .qr_code = qr_code,
-            .x_pos = qr_code.roi.left + 7 * qr_code.elem_width,
+            .x_pos = timer_pattern_start,
         };
     }
 
     pub fn next(self: *Self) ?Rect {
-        if (self.x_pos >= self.qr_code.roi.right - 7 * self.qr_code.elem_width) {
+        if (self.x_pos >= self.qr_code.grid_width - timer_pattern_start) {
             return null;
         }
 
-        const y_pos = self.qr_code.roi.top + 6 * self.qr_code.elem_height;
+        const rect = self.qr_code.idxToRoi(self.x_pos, timer_pattern_offset);
+        self.x_pos += 1;
 
-        const timing_rect: Rect = .{
-            .left = self.x_pos,
-            .top = y_pos,
-            .right = self.x_pos + self.qr_code.elem_width,
-            .bottom = y_pos + self.qr_code.elem_height,
-        };
-
-        self.x_pos += self.qr_code.elem_width;
-        return timing_rect;
+        return rect;
     }
 };
 
@@ -303,6 +304,8 @@ pub const QrCode = struct {
     roi: Rect,
     elem_width: f32,
     elem_height: f32,
+    grid_width: usize,
+    grid_height: usize,
 
     pub fn init(alloc: Allocator, image: *Image) !QrCode {
         var finders = try findFinderPatterns(alloc, image);
@@ -319,8 +322,8 @@ pub const QrCode = struct {
         var elem_height: f32 = 0;
 
         for (finders.items) |rect| {
-            elem_width += rect.width() / 7;
-            elem_height += rect.height() / 7;
+            elem_width += rect.width() / finder_num_elements;
+            elem_height += rect.height() / finder_num_elements;
             qr_rect.top = @min(qr_rect.top, rect.top);
             qr_rect.bottom = @max(qr_rect.bottom, rect.bottom);
             qr_rect.left = @min(qr_rect.left, rect.left);
@@ -334,6 +337,22 @@ pub const QrCode = struct {
             .roi = qr_rect,
             .elem_width = elem_width,
             .elem_height = elem_height,
+            .grid_width = @intFromFloat(@round(qr_rect.width() / elem_width)),
+            .grid_height = @intFromFloat(@round(qr_rect.height() / elem_height)),
+        };
+    }
+
+    pub fn idxToRoi(self: *const QrCode, x: usize, y: usize) Rect {
+        const left = (@as(f32, @floatFromInt(x)) * self.elem_width) + self.roi.left;
+        const right = left + self.elem_width;
+        const top = (@as(f32, @floatFromInt(y)) * self.elem_height) + self.roi.top;
+        const bottom = top + self.elem_height;
+
+        return .{
+            .left = left,
+            .right = right,
+            .top = top,
+            .bottom = bottom,
         };
     }
 
