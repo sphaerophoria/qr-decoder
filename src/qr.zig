@@ -300,6 +300,30 @@ pub const HorizTimingIter = struct {
     }
 };
 
+pub const VertTimingIter = struct {
+    qr_code: *const QrCode,
+    y_pos: usize,
+
+    const Self = @This();
+
+    fn init(qr_code: *const QrCode) VertTimingIter {
+        return .{
+            .qr_code = qr_code,
+            .y_pos = timer_pattern_start,
+        };
+    }
+
+    pub fn next(self: *Self) ?Rect {
+        if (self.y_pos >= self.qr_code.grid_height - timer_pattern_start) {
+            return null;
+        }
+
+        const rect = self.qr_code.idxToRoi(timer_pattern_offset, self.y_pos);
+        self.y_pos += 1;
+
+        return rect;
+    }
+};
 pub const DataIter = struct {
     qr_code: *const QrCode,
     x_pos: i32,
@@ -472,6 +496,10 @@ pub const QrCode = struct {
 
     pub fn horizTimings(self: *const QrCode) HorizTimingIter {
         return HorizTimingIter.init(self);
+    }
+
+    pub fn vertTimings(self: *const QrCode) VertTimingIter {
+        return VertTimingIter.init(self);
     }
 
     pub fn data(self: *const QrCode) DataIter {

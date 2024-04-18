@@ -126,6 +126,20 @@ fn visualizeFinderState(alloc: Allocator, image: *img.Image, visualizer: anytype
         }
     }
 }
+
+fn inspectTiming(it: anytype, image: *img.Image, visualizer: anytype) !void {
+    var expected = true;
+
+    while (it.next()) |timing_rect| {
+        try visualizer.drawBox(timing_rect, "red");
+
+        if (img.isLightRoi(&timing_rect, image) != expected) {
+            std.debug.panic("Unexpected timing value", .{});
+        }
+        expected = !expected;
+    }
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{
         .stack_trace_frames = 99,
@@ -150,17 +164,11 @@ pub fn main() !void {
     var qr_code = try qr.QrCode.init(alloc, &image);
     try visualizer.drawBox(qr_code.roi, "red");
 
-    var timing_it = qr_code.horizTimings();
-    var expected = true;
+    var horiz_timing_it = qr_code.horizTimings();
+    try inspectTiming(&horiz_timing_it, &image, &visualizer);
 
-    while (timing_it.next()) |timing_rect| {
-        try visualizer.drawBox(timing_rect, "red");
-
-        if (img.isLightRoi(&timing_rect, &image) != expected) {
-            std.debug.panic("Unexpected timing value", .{});
-        }
-        expected = !expected;
-    }
+    var vert_timing_it = qr_code.vertTimings();
+    try inspectTiming(&vert_timing_it, &image, &visualizer);
 
     var data_it = qr_code.data();
     var i: usize = 0;
