@@ -460,29 +460,8 @@ pub const DataBitIter = struct {
     }
 
     pub fn next(self: *Self) ?Output {
-        // Qr code data iteration is not super trivial. We follow a zig zag
-        // pattern along a 2 block wide column. Starting in the bottom right,
-        // and moving up.
-        //
-        // If we hit a finder pattern, or the edge of the QR code, we have to
-        // turn around
-        //
-        // If we hit an alignment pattern or a timing pattern we have to skip
-        // over it, preserving the zig zag motion. Note that if the alignment
-        // pattern does not align with the 2 block column, we have to consume
-        // the blocks that it does not cover. AFAICT, just continuing the zig
-        // zag while we are in the "skippable" sections preserves the correct
-        // behavior
-
-        while (true) {
-            const last_move_vertical = self.doZigZag();
-            self.doTurnAround(last_move_vertical) catch {
-                return null;
-            };
-
-            if (!shouldSkip(self.x_pos, self.y_pos)) {
-                break;
-            }
+        if (self.updatePosition()) {
+            return null;
         }
 
         const roi = self.qr_code.idxToRoi(@intCast(self.x_pos), @intCast(self.y_pos));
@@ -499,6 +478,48 @@ pub const DataBitIter = struct {
         };
     }
 
+    /// Update our current position, return true if finished iterating
+    fn updatePosition(self: *Self) bool {
+        // Qr code data iteration is not super trivial. We follow a zig zag
+        // pattern along a 2 block wide column. Starting in the bottom right,
+        // and moving up.
+        //
+        // If we hit a finder pattern, or the edge of the QR code, we have to
+        // turn around
+        //
+        // If we hit an alignment pattern or a timing pattern we have to skip
+        // over it. In some cases we preserve the zig zag pattern, but in
+        // others we have to just continue in a straight line. Note that if the
+        // alignment pattern does not align with the 2 block column, we have to
+        // consume the blocks that it does not cover.
+        //
+        // Do one move following the typical zig zag pattern, and if that puts
+        // us in a bad spot, continue moving until we're out
+
+        var last_move_vertical = self.doZigZag();
+        while (true) {
+            const next_action = self.checkNextAction();
+            switch (next_action) {
+                .continue_straight => {
+                    self.doContinue(last_move_vertical);
+                },
+                .continue_zig_zag => {
+                    last_move_vertical = self.doZigZag();
+                },
+                .turn_around => {
+                    self.doTurnAround();
+                    last_move_vertical = false;
+                },
+                .finish => {
+                    return true;
+                },
+                .yield => {
+                    return false;
+                },
+            }
+        }
+    }
+
     fn doZigZag(self: *Self) bool {
         if (self.moving_vertically) {
             self.x_pos += 1;
@@ -511,53 +532,88 @@ pub const DataBitIter = struct {
         return !self.moving_vertically;
     }
 
-    fn doTurnAround(self: *Self, last_move_vertical: bool) !void {
-        if (!self.shouldTurnAround(self.x_pos, self.y_pos)) {
-            return;
+    fn doContinue(self: *Self, last_move_vertical: bool) void {
+        if (last_move_vertical) {
+            self.y_pos += self.movement_direction;
+        } else {
+            self.x_pos -= 1;
         }
+    }
 
-        if (!last_move_vertical) {
-            std.log.err("Do not know how to handle horizontal out of bounds", .{});
-            return error.Unimplemented;
-        }
-
+    fn doTurnAround(self: *Self) void {
         self.x_pos -= 2;
         self.y_pos -= self.movement_direction;
         self.movement_direction *= -1;
         self.moving_vertically = false;
     }
 
-    fn shouldSkip(x: i32, y: i32) bool {
-        return x == timer_pattern_offset or y == timer_pattern_offset;
-    }
+    const NextAction = enum {
+        continue_zig_zag,
+        continue_straight,
+        turn_around,
+        finish,
+        yield,
+    };
 
-    fn shouldTurnAround(self: *const Self, x: i32, y: i32) bool {
-        const x_left_of_left_finder = x < finder_num_elements + 2;
+    fn checkNextAction(self: *Self) NextAction {
+        const x = self.x_pos;
+        const y = self.y_pos;
+
+        if (x < 0) {
+            return .finish;
+        }
+
+        // If we are out of bounds on the top or bottom edge, nothing to think
+        // about, just turn around
+        const out_of_bounds_y = y >= self.qr_code.grid_height or y < 0;
+        if (out_of_bounds_y) {
+            return .turn_around;
+        }
+
+        const x_right_of_right_finder = x > self.qr_code.grid_width - finder_num_elements - 1;
         const y_above_top_finder = y < finder_num_elements + 2;
+        const in_tr_finder = x_right_of_right_finder and y_above_top_finder;
+        // If we are in the top right finder, we must have got there from
+        // below. We start iterating from the bottom right
+        if (in_tr_finder) {
+            return .turn_around;
+        }
+        const x_left_of_left_finder = x < finder_num_elements + 2;
 
         const in_tl_finder = x_left_of_left_finder and y_above_top_finder;
+
+        // If we are in one of the left finders, we have two options. If we
+        // were moving towards the finder we hit, we have to turn around,
+        // however if we're moving away, we can just keep zig zagging until we
+        // escape
         if (in_tl_finder) {
-            return true;
+            if (self.movement_direction == -1) {
+                return .turn_around;
+            } else {
+                return .continue_zig_zag;
+            }
         }
 
         const y_below_bottom_finder = y >= self.qr_code.grid_height - finder_num_elements - 1;
         const in_bl_finder = x_left_of_left_finder and y_below_bottom_finder;
         if (in_bl_finder) {
-            return true;
+            if (self.movement_direction == 1) {
+                return .turn_around;
+            } else {
+                return .continue_zig_zag;
+            }
         }
 
-        const x_right_of_right_finder = x > self.qr_code.grid_width - finder_num_elements - 1;
-        const in_tr_finder = x_right_of_right_finder and y_above_top_finder;
-        if (in_tr_finder) {
-            return true;
+        // If we hit the timing rows, we have to continue moving in the same
+        // direction. Note that we do not do the normal zig zag pattern in this
+        // case. If we did, we would read 4 bits vertically on the left edge of
+        // the vertical timing pattern instead of skipping the timing column
+        // completely
+        if (x == timer_pattern_offset or y == timer_pattern_offset) {
+            return .continue_straight;
         }
 
-        const out_of_bounds = x >= self.qr_code.grid_width or x < 0 or y >= self.qr_code.grid_height or y < 0;
-        if (out_of_bounds) {
-            return true;
-        }
-
-        return false;
+        return .yield;
     }
 };
 
