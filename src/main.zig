@@ -140,6 +140,12 @@ fn inspectTiming(it: anytype, image: *img.Image, visualizer: anytype) !void {
     }
 }
 
+fn drawFormatBoxes(it: anytype, visualizer: anytype) !void {
+    while (it.next()) |roi| {
+        try visualizer.drawBox(roi, "purple", null);
+    }
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{
         .stack_trace_frames = 99,
@@ -169,6 +175,12 @@ pub fn main() !void {
 
     var vert_timing_it = qr_code.vertTimings();
     try inspectTiming(&vert_timing_it, &image, &visualizer);
+
+    var horiz_format_it = qr_code.horizFormat();
+    try drawFormatBoxes(&horiz_format_it, &visualizer);
+
+    var vert_format_it = qr_code.vertFormat();
+    try drawFormatBoxes(&vert_format_it, &visualizer);
 
     var data_it = qr_code.data();
     var i: usize = 0;

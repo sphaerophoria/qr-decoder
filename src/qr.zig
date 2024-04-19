@@ -285,6 +285,9 @@ const timer_pattern_offset: usize = finder_num_elements - 1;
 // Horizontal position for horizontal pattern, element directly after finder
 // pattern
 const timer_pattern_start: usize = finder_num_elements;
+// Vertical position for horizontal pattern, 2 elements after finder pattern, 1
+// index after the length
+const format_pattern_offset: usize = finder_num_elements + 1;
 
 pub const HorizTimingIter = struct {
     qr_code: *const QrCode,
@@ -335,6 +338,79 @@ pub const VertTimingIter = struct {
         return rect;
     }
 };
+
+pub const HorizFormatIter = struct {
+    qr_code: *const QrCode,
+    x_pos: usize,
+
+    const Self = @This();
+
+    fn init(qr_code: *const QrCode) HorizFormatIter {
+        return .{
+            .qr_code = qr_code,
+            .x_pos = 0,
+        };
+    }
+
+    pub fn next(self: *Self) ?Rect {
+        while (true) {
+            if (self.x_pos >= self.qr_code.grid_width) {
+                return null;
+            }
+
+            const prev_x = self.x_pos;
+
+            self.x_pos += 1;
+            const second_half_start = self.qr_code.grid_width - finder_num_elements - 1;
+
+            if (self.x_pos >= finder_num_elements + 1 and self.x_pos < second_half_start) {
+                self.x_pos = second_half_start;
+            }
+
+            if (prev_x == timer_pattern_offset) {
+                continue;
+            }
+
+            return self.qr_code.idxToRoi(prev_x, format_pattern_offset);
+        }
+    }
+};
+
+pub const VertFormatIter = struct {
+    qr_code: *const QrCode,
+    y_pos: usize,
+
+    const Self = @This();
+
+    fn init(qr_code: *const QrCode) VertFormatIter {
+        return .{
+            .qr_code = qr_code,
+            .y_pos = qr_code.grid_height,
+        };
+    }
+
+    pub fn next(self: *Self) ?Rect {
+        while (true) {
+            if (self.y_pos == 0) {
+                return null;
+            }
+            self.y_pos -= 1;
+
+            const first_half_end = self.qr_code.grid_height - finder_num_elements - 1;
+
+            if (self.y_pos == first_half_end) {
+                self.y_pos = finder_num_elements + 1;
+            }
+
+            if (self.y_pos == timer_pattern_offset) {
+                continue;
+            }
+
+            return self.qr_code.idxToRoi(format_pattern_offset, self.y_pos);
+        }
+    }
+};
+
 pub const DataIter = struct {
     qr_code: *const QrCode,
     x_pos: i32,
@@ -514,6 +590,14 @@ pub const QrCode = struct {
 
     pub fn vertTimings(self: *const QrCode) VertTimingIter {
         return VertTimingIter.init(self);
+    }
+
+    pub fn horizFormat(self: *const QrCode) HorizFormatIter {
+        return HorizFormatIter.init(self);
+    }
+
+    pub fn vertFormat(self: *const QrCode) VertFormatIter {
+        return VertFormatIter.init(self);
     }
 
     pub fn data(self: *const QrCode) DataIter {
