@@ -129,7 +129,8 @@ fn inspectTiming(it: anytype, image: *img.Image, visualizer: anytype) !void {
         try visualizer.drawBox(timing_rect, "red", null);
 
         if (img.isLightRoi(&timing_rect, image) != expected) {
-            std.debug.panic("Unexpected timing value", .{});
+            std.log.err("Timing value unexpected", .{});
+            return error.InvalidData;
         }
         expected = !expected;
     }
