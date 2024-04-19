@@ -159,7 +159,13 @@ pub fn main() !void {
     var image = try img.Image.open(args.input);
     defer image.deinit();
 
-    var svg_file = try std.fs.cwd().createFile(args.output, .{});
+    try std.fs.cwd().makePath(args.output);
+    var output_dir = try std.fs.cwd().openDir(args.output, .{});
+    defer output_dir.close();
+
+    try std.fs.cwd().copyFile(args.input, output_dir, args.input, .{});
+
+    var svg_file = try output_dir.createFile("overlay.svg", .{});
     defer svg_file.close();
 
     var visualizer = try vis.Visualizer(@TypeOf(svg_file.writer())).init(alloc, svg_file.writer(), image.width, image.height, args.input);
