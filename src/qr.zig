@@ -555,38 +555,86 @@ pub const DataBitIter = struct {
         yield,
     };
 
-    fn checkNextAction(self: *Self) NextAction {
-        const x = self.x_pos;
-        const y = self.y_pos;
+    const NextActionHelper = struct {
+        x: i32,
+        y: i32,
+        grid_width: usize,
+        grid_height: usize,
+        x_right_of_right_finder: bool,
+        y_above_top_finder: bool,
+        x_left_of_left_finder: bool,
+        y_below_bottom_finder: bool,
 
-        if (x < 0) {
+        const Helper = @This();
+
+        fn init(parent: *const Self) Helper {
+            const x_right_of_right_finder = parent.x_pos > parent.qr_code.grid_width - finder_num_elements - 1;
+            const y_below_bottom_finder = parent.y_pos >= parent.qr_code.grid_height - finder_num_elements - 1;
+            const y_above_top_finder = parent.y_pos <= format_pattern_offset;
+            const x_left_of_left_finder = parent.x_pos <= format_pattern_offset;
+            return .{
+                .x = parent.x_pos,
+                .y = parent.y_pos,
+                .grid_width = parent.qr_code.grid_width,
+                .grid_height = parent.qr_code.grid_height,
+                .x_right_of_right_finder = x_right_of_right_finder,
+                .y_above_top_finder = y_above_top_finder,
+                .x_left_of_left_finder = x_left_of_left_finder,
+                .y_below_bottom_finder = y_below_bottom_finder,
+            };
+        }
+
+        fn finished(self: *const Helper) bool {
+            return self.x < 0;
+        }
+
+        fn outOfBoundsY(self: *const Helper) bool {
+            return self.y >= self.grid_height or self.y < 0;
+        }
+
+        fn inTrFinder(self: *const Helper) bool {
+            return self.x_right_of_right_finder and self.y_above_top_finder;
+        }
+
+        fn inTlFinder(self: *const Helper) bool {
+            return self.x_left_of_left_finder and self.y_above_top_finder;
+        }
+
+        fn inBrFinder(self: *const Helper) bool {
+            return self.x_left_of_left_finder and self.y_below_bottom_finder;
+        }
+
+        fn inTimerPattern(self: *const Helper) bool {
+            return self.x == timer_pattern_offset or self.y == timer_pattern_offset;
+        }
+    };
+
+    fn checkNextAction(self: *Self) NextAction {
+        // There's a lot of conditions here, name them and put them somewhere else
+        const helper = NextActionHelper.init(self);
+
+        if (helper.finished()) {
             return .finish;
         }
 
         // If we are out of bounds on the top or bottom edge, nothing to think
         // about, just turn around
-        const out_of_bounds_y = y >= self.qr_code.grid_height or y < 0;
-        if (out_of_bounds_y) {
+        if (helper.outOfBoundsY()) {
             return .turn_around;
         }
 
-        const x_right_of_right_finder = x > self.qr_code.grid_width - finder_num_elements - 1;
-        const y_above_top_finder = y < finder_num_elements + 2;
-        const in_tr_finder = x_right_of_right_finder and y_above_top_finder;
         // If we are in the top right finder, we must have got there from
         // below. We start iterating from the bottom right
-        if (in_tr_finder) {
+        if (helper.inTrFinder()) {
             return .turn_around;
         }
-        const x_left_of_left_finder = x < finder_num_elements + 2;
-
-        const in_tl_finder = x_left_of_left_finder and y_above_top_finder;
 
         // If we are in one of the left finders, we have two options. If we
         // were moving towards the finder we hit, we have to turn around,
-        // however if we're moving away, we can just keep zig zagging until we
+        // however if we're moving away (because we entered from the outside
+        // edge during a turn around),  we can just keep zig zagging until we
         // escape
-        if (in_tl_finder) {
+        if (helper.inTlFinder()) {
             if (self.movement_direction == -1) {
                 return .turn_around;
             } else {
@@ -594,9 +642,7 @@ pub const DataBitIter = struct {
             }
         }
 
-        const y_below_bottom_finder = y >= self.qr_code.grid_height - finder_num_elements - 1;
-        const in_bl_finder = x_left_of_left_finder and y_below_bottom_finder;
-        if (in_bl_finder) {
+        if (helper.inBrFinder()) {
             if (self.movement_direction == 1) {
                 return .turn_around;
             } else {
@@ -609,7 +655,7 @@ pub const DataBitIter = struct {
         // case. If we did, we would read 4 bits vertically on the left edge of
         // the vertical timing pattern instead of skipping the timing column
         // completely
-        if (x == timer_pattern_offset or y == timer_pattern_offset) {
+        if (helper.inTimerPattern()) {
             return .continue_straight;
         }
 
