@@ -49,19 +49,19 @@ const ArgsHelper = struct {
 
 const Args = struct {
     input: [:0]const u8,
-    output: []const u8,
+    output: ?[]const u8,
     it: std.process.ArgIterator,
 
     fn parse(alloc: Allocator) !Args {
         var helper = try ArgsHelper.init(alloc);
         var input_opt: ?[:0]const u8 = null;
-        var output_opt: ?[]const u8 = null;
+        var output: ?[]const u8 = null;
 
         while (helper.next()) |arg| {
             if (std.mem.eql(u8, arg, "--input")) {
                 input_opt = helper.nextStr("--input");
             } else if (std.mem.eql(u8, arg, "--output")) {
-                output_opt = helper.nextStr("--output");
+                output = helper.nextStr("--output");
             } else if (std.mem.eql(u8, arg, "--help")) {
                 helper.help();
             }
@@ -69,11 +69,6 @@ const Args = struct {
 
         var input = input_opt orelse {
             helper.print("--input not provided\n", .{});
-            helper.help();
-        };
-
-        var output = output_opt orelse {
-            helper.print("--output not provided\n", .{});
             helper.help();
         };
 
@@ -146,34 +141,18 @@ fn drawFormatBoxes(it: anytype, visualizer: anytype) !void {
     }
 }
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{
-        .stack_trace_frames = 99,
-    }){};
-    defer _ = gpa.deinit();
-    var alloc = gpa.allocator();
-
-    var args = try Args.parse(alloc);
-    defer args.deinit();
-
-    var image = try img.Image.open(args.input);
-    defer image.deinit();
-
-    try std.fs.cwd().makePath(args.output);
-    var output_dir = try std.fs.cwd().openDir(args.output, .{});
-    defer output_dir.close();
-
-    try std.fs.cwd().copyFile(args.input, output_dir, args.input, .{});
+fn visualize(alloc: Allocator, image: *img.Image, input_path: []const u8, output_dir: std.fs.Dir) !void {
+    try std.fs.cwd().copyFile(input_path, output_dir, input_path, .{});
 
     var svg_file = try output_dir.createFile("overlay.svg", .{});
     defer svg_file.close();
 
-    var visualizer = try vis.Visualizer(@TypeOf(svg_file.writer())).init(alloc, svg_file.writer(), image.width, image.height, args.input);
+    var visualizer = try vis.Visualizer(@TypeOf(svg_file.writer())).init(alloc, svg_file.writer(), image.width, image.height, input_path);
     defer visualizer.finish() catch {};
 
-    try visualizeFinderState(alloc, &image, &visualizer);
+    try visualizeFinderState(alloc, image, &visualizer);
 
-    var qr_code = try qr.QrCode.init(alloc, &image);
+    var qr_code = try qr.QrCode.init(alloc, image);
     try visualizer.drawBox(qr_code.roi, "red", null);
 
     var unmasked_file = try output_dir.createFile("unmasked.svg", .{});
@@ -189,10 +168,10 @@ pub fn main() !void {
     defer unmasked_visualizer.finish() catch {};
 
     var horiz_timing_it = qr_code.horizTimings();
-    try inspectTiming(&horiz_timing_it, &image, &visualizer);
+    try inspectTiming(&horiz_timing_it, image, &visualizer);
 
     var vert_timing_it = qr_code.vertTimings();
-    try inspectTiming(&vert_timing_it, &image, &visualizer);
+    try inspectTiming(&vert_timing_it, image, &visualizer);
 
     var horiz_format_it = qr_code.horizFormat();
     try drawFormatBoxes(&horiz_format_it, &visualizer);
@@ -200,7 +179,7 @@ pub fn main() !void {
     var vert_format_it = qr_code.vertFormat();
     try drawFormatBoxes(&vert_format_it, &visualizer);
 
-    var bit_it = try qr_code.bitIter(&image);
+    var bit_it = try qr_code.bitIter(image);
 
     var i: usize = 0;
     while (bit_it.next()) |item| {
@@ -215,6 +194,28 @@ pub fn main() !void {
         try visualizer.drawText(item.roi.left + qr_code.elem_width / 3.0, item.roi.bottom - qr_code.elem_height / 3.0, "red", i_s);
         i += 1;
     }
+}
+
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{
+        .stack_trace_frames = 99,
+    }){};
+    defer _ = gpa.deinit();
+    var alloc = gpa.allocator();
+
+    var args = try Args.parse(alloc);
+    defer args.deinit();
+
+    var image = try img.Image.open(args.input);
+    defer image.deinit();
+
+    if (args.output) |output_path| {
+        try std.fs.cwd().makePath(output_path);
+        const output_dir = try std.fs.cwd().openDir(output_path, .{});
+        try visualize(alloc, &image, args.input, output_dir);
+    }
+
+    var qr_code = try qr.QrCode.init(alloc, &image);
 
     var data_it = try qr_code.data(&image);
     while (data_it.next()) |b| {

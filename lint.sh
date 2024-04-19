@@ -13,7 +13,6 @@ valgrind \
         --track-fds=yes \
         --error-exitcode=1 \
         ./zig-out/bin/qr-decoder \
-                --input ./res/hello_world.gif \
-		--output /dev/null
+                --input ./res/hello_world.gif
 
 echo "Success"
