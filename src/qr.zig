@@ -208,6 +208,13 @@ fn addRectToBucket(buckets: *std.ArrayList(std.ArrayList(Rect)), rect: Rect) !vo
     try buckets.items[buckets.items.len - 1].append(rect);
 }
 
+fn isAlmostSame(a: usize, b: usize) bool {
+    const a_f: f32 = @floatFromInt(a);
+    const b_f: f32 = @floatFromInt(b);
+
+    return @fabs(a_f / b_f - 1.0) < 0.2;
+}
+
 /// Find potential pixel positions for the center of the qr finder pattern in 1 dimension.
 pub fn finderCandidates(alloc: Allocator, it: anytype) !std.ArrayList(FinderCandidate1D) {
     var is_light_it = img.isLightIter(it);
@@ -225,19 +232,19 @@ pub fn finderCandidates(alloc: Allocator, it: anytype) !std.ArrayList(FinderCand
     for (0..end) |i| {
         const ref = rle.items[i].length;
         // FIXME: Allow for any amount of error
-        if (rle.items[i + 1].length != ref) {
+        if (!isAlmostSame(rle.items[i + 1].length, ref)) {
             continue;
         }
 
-        if (rle.items[i + 2].length / ref != 3) {
+        if (!isAlmostSame(rle.items[i + 2].length, ref * 3)) {
             continue;
         }
 
-        if (rle.items[i + 3].length != ref) {
+        if (!isAlmostSame(rle.items[i + 3].length, ref)) {
             continue;
         }
 
-        if (rle.items[i + 4].length != ref) {
+        if (!isAlmostSame(rle.items[i + 4].length, ref)) {
             continue;
         }
 
@@ -245,9 +252,13 @@ pub fn finderCandidates(alloc: Allocator, it: anytype) !std.ArrayList(FinderCand
         const center_block_start: f32 = @floatFromInt(rle.items[i + 2].start);
         var center = center_block_start + center_block_length / 2;
 
+        const first = rle.items[i];
+        const last = rle.items[i + 4];
+        const length: f32 = @floatFromInt(last.start + last.length - first.start);
+
         try ret.append(.{
             .center = center,
-            .length = @floatFromInt(ref * finder_num_elements),
+            .length = length,
         });
     }
 
@@ -447,6 +458,10 @@ pub const QrCode = struct {
     pub fn init(alloc: Allocator, image: *Image) !QrCode {
         var finders = try findFinderPatterns(alloc, image);
         defer finders.deinit();
+
+        if (finders.items.len != 3) {
+            return error.InvalidData;
+        }
 
         var qr_rect = Rect{
             .top = std.math.floatMax(f32),
