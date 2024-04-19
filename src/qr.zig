@@ -289,6 +289,19 @@ const timer_pattern_start: usize = finder_num_elements;
 // index after the length
 const format_pattern_offset: usize = finder_num_elements + 1;
 
+pub fn mask_pattern_0(x: usize, y: usize) bool {
+    _ = y;
+    return x % 3 == 0;
+}
+
+pub fn mask_pattern_2(x: usize, y: usize) bool {
+    return (x + y) % 2 == 0;
+}
+
+pub fn mask_pattern_5(x: usize, y: usize) bool {
+    return (((x * y) % 3) + x + y) % 2 == 0;
+}
+
 pub const HorizTimingIter = struct {
     qr_code: *const QrCode,
     x_pos: usize,
@@ -411,16 +424,27 @@ pub const VertFormatIter = struct {
     }
 };
 
-pub const DataIter = struct {
+pub const MaskFn = *const fn (usize, usize) bool;
+
+pub const DataBitIter = struct {
     qr_code: *const QrCode,
     x_pos: i32,
     y_pos: i32,
     moving_vertically: bool,
     movement_direction: i2,
+    mask_fn: MaskFn,
+    image: *img.Image,
 
     const Self = @This();
 
-    pub fn init(qr_code: *const QrCode) Self {
+    pub const Output = struct {
+        x: usize,
+        y: usize,
+        val: bool,
+        roi: Rect,
+    };
+
+    pub fn init(qr_code: *const QrCode, mask_fn: MaskFn, image: *img.Image) Self {
         return .{
             .qr_code = qr_code,
             // Initial position is off the bottom edge, because next()
@@ -428,12 +452,14 @@ pub const DataIter = struct {
             // zag starts us in the bottom right corner
             .x_pos = @intCast(qr_code.grid_width - 2),
             .y_pos = @intCast(qr_code.grid_height),
+            .mask_fn = mask_fn,
+            .image = image,
             .moving_vertically = true,
             .movement_direction = -1,
         };
     }
 
-    pub fn next(self: *Self) ?Rect {
+    pub fn next(self: *Self) ?Output {
         // Qr code data iteration is not super trivial. We follow a zig zag
         // pattern along a 2 block wide column. Starting in the bottom right,
         // and moving up.
@@ -459,7 +485,18 @@ pub const DataIter = struct {
             }
         }
 
-        return self.qr_code.idxToRoi(@intCast(self.x_pos), @intCast(self.y_pos));
+        const roi = self.qr_code.idxToRoi(@intCast(self.x_pos), @intCast(self.y_pos));
+        const x: usize = @intCast(self.x_pos);
+        const y: usize = @intCast(self.y_pos);
+        const is_dark = !img.isLightRoi(&roi, self.image);
+        const val = is_dark != self.mask_fn(x, y);
+
+        return .{
+            .x = @intCast(self.x_pos),
+            .y = @intCast(self.y_pos),
+            .val = val,
+            .roi = roi,
+        };
     }
 
     fn doZigZag(self: *Self) bool {
@@ -600,8 +637,35 @@ pub const QrCode = struct {
         return VertFormatIter.init(self);
     }
 
-    pub fn data(self: *const QrCode) DataIter {
-        return DataIter.init(self);
+    pub fn bitIter(self: *const QrCode, image: *img.Image) !DataBitIter {
+        var format_it = self.horizFormat();
+        for (0..2) |_| {
+            _ = format_it.next();
+        }
+
+        var mask_val: u3 = 0;
+        for (0..3) |i| {
+            const roi = format_it.next() orelse {
+                std.log.err("Format iterator ended before we finished parsing the mask type", .{});
+                return error.InvalidData;
+            };
+
+            if (img.isLightRoi(&roi, image)) {
+                mask_val |= @as(@TypeOf(mask_val), 1) << @intCast(i);
+            }
+        }
+
+        var mask_fn = switch (mask_val) {
+            0 => &mask_pattern_0,
+            2 => &mask_pattern_2,
+            5 => &mask_pattern_5,
+            else => {
+                std.log.err("Unimplemented mask function", .{});
+                return error.Unimplemented;
+            },
+        };
+
+        return DataBitIter.init(self, mask_fn, image);
     }
 };
 

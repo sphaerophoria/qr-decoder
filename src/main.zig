@@ -176,6 +176,18 @@ pub fn main() !void {
     var qr_code = try qr.QrCode.init(alloc, &image);
     try visualizer.drawBox(qr_code.roi, "red", null);
 
+    var unmasked_file = try output_dir.createFile("unmasked.svg", .{});
+    defer unmasked_file.close();
+
+    var unmasked_visualizer = try vis.Visualizer(@TypeOf(unmasked_file.writer())).init(
+        alloc,
+        unmasked_file.writer(),
+        image.width,
+        image.height,
+        null,
+    );
+    defer unmasked_visualizer.finish() catch {};
+
     var horiz_timing_it = qr_code.horizTimings();
     try inspectTiming(&horiz_timing_it, &image, &visualizer);
 
@@ -188,17 +200,19 @@ pub fn main() !void {
     var vert_format_it = qr_code.vertFormat();
     try drawFormatBoxes(&vert_format_it, &visualizer);
 
-    var data_it = qr_code.data();
+    var bit_it = try qr_code.bitIter(&image);
+
     var i: usize = 0;
-    while (data_it.next()) |roi| {
-        if (i >= 200) {
-            return;
+    while (bit_it.next()) |item| {
+        if (item.val) {
+            try unmasked_visualizer.drawBox(item.roi, "black", "black");
         }
-        try visualizer.drawBox(roi, "orange", null);
+
+        try visualizer.drawBox(item.roi, "orange", null);
         var i_s = try std.fmt.allocPrint(alloc, "{d}", .{i});
         defer alloc.free(i_s);
 
-        try visualizer.drawText(roi.left + qr_code.elem_width / 3.0, roi.bottom - qr_code.elem_height / 3.0, "red", i_s);
+        try visualizer.drawText(item.roi.left + qr_code.elem_width / 3.0, item.roi.bottom - qr_code.elem_height / 3.0, "red", i_s);
         i += 1;
     }
 }
