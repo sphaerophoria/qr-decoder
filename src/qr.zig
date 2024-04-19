@@ -561,6 +561,92 @@ pub const DataBitIter = struct {
     }
 };
 
+pub fn BitCollector(comptime ValType: type, comptime ShiftType: type) type {
+    return struct {
+        val: ValType = 0,
+        idx: ShiftType = std.math.maxInt(ShiftType),
+
+        const Self = @This();
+        fn push(self: *Self, in: bool) ?ValType {
+            if (in) {
+                self.val |= @as(ValType, 1) << self.idx;
+            }
+
+            if (self.idx == 0) {
+                self.idx = std.math.maxInt(ShiftType);
+                const ret = self.val;
+                self.val = 0;
+                return ret;
+            } else {
+                self.idx -= 1;
+            }
+
+            return null;
+        }
+    };
+}
+
+test "bit collector" {
+    var c = BitCollector(u4, u2){};
+    try std.testing.expectEqual(@as(?u4, null), c.push(true));
+    try std.testing.expectEqual(@as(?u4, null), c.push(false));
+    try std.testing.expectEqual(@as(?u4, null), c.push(true));
+    try std.testing.expectEqual(@as(?u4, 0b1011), c.push(true));
+}
+
+fn collectBits(collector: anytype, it: *DataBitIter) !@TypeOf(collector.val) {
+    while (true) {
+        var item = it.next() orelse {
+            std.log.err("data stream ended early\n", .{});
+            return error.InvalidData;
+        };
+
+        if (collector.push(item.val)) |output| {
+            return output;
+        }
+    }
+}
+
+pub const DataIter = struct {
+    bit_iter: DataBitIter,
+    encoding: u4,
+    length: u8,
+    num_bytes_read: usize,
+    collector: BitCollector(u8, u3),
+
+    fn init(bit_iter_in: DataBitIter) !DataIter {
+        var bit_iter = bit_iter_in;
+
+        var encoding_collector = BitCollector(u4, u2){};
+        var encoding = try collectBits(&encoding_collector, &bit_iter);
+
+        var u8_collector = BitCollector(u8, u3){};
+        var length: u8 = try collectBits(&u8_collector, &bit_iter);
+
+        return .{
+            .bit_iter = bit_iter,
+            .encoding = encoding,
+            .num_bytes_read = 0,
+            .length = length,
+            .collector = BitCollector(u8, u3){},
+        };
+    }
+
+    pub fn next(self: *DataIter) ?u8 {
+        while (true) {
+            if (self.length == self.num_bytes_read) {
+                return null;
+            }
+
+            const ret = collectBits(&self.collector, &self.bit_iter) catch {
+                return null;
+            };
+            self.num_bytes_read += 1;
+            return ret;
+        }
+    }
+};
+
 pub const QrCode = struct {
     roi: Rect,
     elem_width: f32,
@@ -666,6 +752,10 @@ pub const QrCode = struct {
         };
 
         return DataBitIter.init(self, mask_fn, image);
+    }
+
+    pub fn data(self: *QrCode, image: *img.Image) !DataIter {
+        return DataIter.init(try self.bitIter(image));
     }
 };
 

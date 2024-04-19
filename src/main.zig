@@ -215,6 +215,18 @@ pub fn main() !void {
         try visualizer.drawText(item.roi.left + qr_code.elem_width / 3.0, item.roi.bottom - qr_code.elem_height / 3.0, "red", i_s);
         i += 1;
     }
+
+    var data_it = try qr_code.data(&image);
+    while (data_it.next()) |b| {
+        switch (data_it.encoding) {
+            4 => std.debug.print("{c}", .{b}),
+            else => {
+                std.log.err("Unimplemented encoding: {d}", .{data_it.encoding});
+                return error.Unimplemented;
+            },
+        }
+    }
+    std.debug.print("\n", .{});
 }
 
 test {
