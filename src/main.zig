@@ -120,7 +120,7 @@ fn visualizeFinderState(alloc: Allocator, image: *img.Image, visualizer: anytype
             },
             .rois => |rois| {
                 for (rois) |roi| {
-                    try visualizer.drawBox(roi, "yellow");
+                    try visualizer.drawBox(roi, "yellow", null);
                 }
             },
         }
@@ -131,7 +131,7 @@ fn inspectTiming(it: anytype, image: *img.Image, visualizer: anytype) !void {
     var expected = true;
 
     while (it.next()) |timing_rect| {
-        try visualizer.drawBox(timing_rect, "red");
+        try visualizer.drawBox(timing_rect, "red", null);
 
         if (img.isLightRoi(&timing_rect, image) != expected) {
             std.debug.panic("Unexpected timing value", .{});
@@ -168,7 +168,7 @@ pub fn main() !void {
     try visualizeFinderState(alloc, &image, &visualizer);
 
     var qr_code = try qr.QrCode.init(alloc, &image);
-    try visualizer.drawBox(qr_code.roi, "red");
+    try visualizer.drawBox(qr_code.roi, "red", null);
 
     var horiz_timing_it = qr_code.horizTimings();
     try inspectTiming(&horiz_timing_it, &image, &visualizer);
@@ -188,7 +188,7 @@ pub fn main() !void {
         if (i >= 200) {
             return;
         }
-        try visualizer.drawBox(roi, "orange");
+        try visualizer.drawBox(roi, "orange", null);
         var i_s = try std.fmt.allocPrint(alloc, "{d}", .{i});
         defer alloc.free(i_s);
 

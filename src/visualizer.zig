@@ -12,7 +12,7 @@ pub fn Visualizer(comptime Writer: type) type {
 
         const Self = @This();
 
-        pub fn init(alloc: Allocator, writer: anytype, width: usize, height: usize, image_path: []const u8) !Self {
+        pub fn init(alloc: Allocator, writer: anytype, width: usize, height: usize, image_path: ?[]const u8) !Self {
             var svg_builder = xml.xmlBuilder(alloc, writer);
 
             try svg_builder.addNode("svg");
@@ -22,13 +22,15 @@ pub fn Visualizer(comptime Writer: type) type {
             try svg_builder.addAttributeNum("height", height);
             try svg_builder.finishAttributes();
 
-            try svg_builder.addNode("image");
-            try svg_builder.addAttribute("x", "0");
-            try svg_builder.addAttribute("y", "0");
-            try svg_builder.addAttributeNum("width", width);
-            try svg_builder.addAttributeNum("height", height);
-            try svg_builder.addAttribute("href", image_path);
-            try svg_builder.finishNode();
+            if (image_path) |path| {
+                try svg_builder.addNode("image");
+                try svg_builder.addAttribute("x", "0");
+                try svg_builder.addAttribute("y", "0");
+                try svg_builder.addAttributeNum("width", width);
+                try svg_builder.addAttributeNum("height", height);
+                try svg_builder.addAttribute("href", path);
+                try svg_builder.finishNode();
+            }
 
             return .{
                 .svg_builder = svg_builder,
@@ -50,13 +52,14 @@ pub fn Visualizer(comptime Writer: type) type {
             try self.svg_builder.finishNode();
         }
 
-        pub fn drawBox(self: *Self, rect: Rect, stroke: []const u8) !void {
+        pub fn drawBox(self: *Self, rect: Rect, stroke: []const u8, fill: ?[]const u8) !void {
             try self.svg_builder.addNode("rect");
             try self.svg_builder.addAttributeNum("x", rect.left);
             try self.svg_builder.addAttributeNum("y", rect.top);
             try self.svg_builder.addAttributeNum("width", rect.width());
             try self.svg_builder.addAttributeNum("height", rect.height());
-            try self.svg_builder.addAttribute("fill", "none");
+            const fill_val = fill orelse "none";
+            try self.svg_builder.addAttribute("fill", fill_val);
             try self.svg_builder.addAttribute("stroke", stroke);
             try self.svg_builder.finishNode();
         }
