@@ -715,6 +715,7 @@ pub const QrCode = struct {
         defer finders.deinit();
 
         if (finders.items.len != 3) {
+            std.log.err("found {d} finder patterns, expected 3", .{finders.items.len});
             return error.InvalidData;
         }
 
@@ -814,6 +815,23 @@ pub const QrCode = struct {
         return DataIter.init(try self.bitIter(image));
     }
 };
+
+test "hello world" {
+    var alloc = std.testing.allocator;
+    var image = try img.Image.fromArray(@embedFile("res/hello_world.gif"));
+    var qr_code = try QrCode.init(alloc, &image);
+    var it = try qr_code.data(&image);
+    try std.testing.expectEqual(it.encoding, 4);
+
+    var output = std.ArrayList(u8).init(alloc);
+    defer output.deinit();
+
+    while (it.next()) |v| {
+        try output.append(v);
+    }
+
+    try std.testing.expectEqualStrings("hello world", output.items);
+}
 
 const RleItem = struct {
     start: usize,

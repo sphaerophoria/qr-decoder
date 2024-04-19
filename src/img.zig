@@ -115,6 +115,19 @@ pub const Image = struct {
         };
     }
 
+    pub fn fromArray(input: []const u8) !Image {
+        var img_width_c: c_int = undefined;
+        var img_height_c: c_int = undefined;
+        var num_channels: c_int = undefined;
+        var data = c.stbi_load_from_memory(input.ptr, @intCast(input.len), &img_width_c, &img_height_c, &num_channels, 1);
+
+        return .{
+            .width = @intCast(img_width_c),
+            .height = @intCast(img_height_c),
+            .data = data,
+        };
+    }
+
     pub fn deinit(self: *Image) void {
         c.stbi_image_free(self.data);
     }
