@@ -143,12 +143,14 @@ fn drawFormatBoxes(it: anytype, visualizer: anytype) !void {
 }
 
 fn visualize(alloc: Allocator, image: *img.Image, input_path: []const u8, output_dir: std.fs.Dir) !void {
-    try std.fs.cwd().copyFile(input_path, output_dir, input_path, .{});
+    var input_splitter = std.mem.splitBackwards(u8, input_path, "/");
+    const input_name = input_splitter.next() orelse input_path;
+    try std.fs.cwd().copyFile(input_path, output_dir, input_name, .{});
 
     var svg_file = try output_dir.createFile("overlay.svg", .{});
     defer svg_file.close();
 
-    var visualizer = try vis.Visualizer(@TypeOf(svg_file.writer())).init(alloc, svg_file.writer(), image.width, image.height, input_path);
+    var visualizer = try vis.Visualizer(@TypeOf(svg_file.writer())).init(alloc, svg_file.writer(), image.width, image.height, input_name);
     defer visualizer.finish() catch {};
 
     try visualizeFinderState(alloc, image, &visualizer);
