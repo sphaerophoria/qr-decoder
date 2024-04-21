@@ -156,6 +156,8 @@ fn visualize(alloc: Allocator, image: *img.Image, input_path: []const u8, output
     try visualizeFinderState(alloc, image, &visualizer);
 
     var qr_code = try qr.QrCode.init(alloc, image);
+    defer qr_code.deinit();
+
     try visualizer.drawBox(qr_code.roi, "red", null);
 
     var unmasked_file = try output_dir.createFile("unmasked.svg", .{});
@@ -181,6 +183,19 @@ fn visualize(alloc: Allocator, image: *img.Image, input_path: []const u8, output
 
     var vert_format_it = qr_code.vertFormat();
     try drawFormatBoxes(&vert_format_it, &visualizer);
+
+    var alignment_finder = qr.AlignmentFinder.init(
+        qr_code.roi,
+        qr_code.elem_width,
+        qr_code.elem_height,
+        qr_code.grid_width,
+        qr_code.grid_height,
+        image,
+    );
+
+    while (alignment_finder.next()) |item| {
+        try visualizer.drawBox(item.roi, "blue", null);
+    }
 
     var bit_it = try qr_code.bitIter(image);
 
@@ -219,6 +234,7 @@ pub fn main() !void {
     }
 
     var qr_code = try qr.QrCode.init(alloc, &image);
+    defer qr_code.deinit();
 
     var data_it = try qr_code.data(&image);
     while (data_it.next()) |b| {

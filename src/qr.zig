@@ -7,6 +7,8 @@ const Image = img.Image;
 
 const Allocator = std.mem.Allocator;
 
+const qr = @This();
+
 const FinderCandidate1D = struct {
     center: f32,
     length: f32,
@@ -287,6 +289,7 @@ const timer_pattern_start: usize = finder_num_elements;
 // Vertical position for horizontal pattern, 2 elements after finder pattern, 1
 // index after the length
 const format_pattern_offset: usize = finder_num_elements + 1;
+const alignment_pattern_size: usize = 5;
 
 pub fn mask_pattern_0(x: usize, y: usize) bool {
     _ = y;
@@ -563,6 +566,7 @@ pub const DataBitIter = struct {
         y_above_top_finder: bool,
         x_left_of_left_finder: bool,
         y_below_bottom_finder: bool,
+        alignment_patterns: []const GridPoint,
 
         const Helper = @This();
 
@@ -580,6 +584,7 @@ pub const DataBitIter = struct {
                 .y_above_top_finder = y_above_top_finder,
                 .x_left_of_left_finder = x_left_of_left_finder,
                 .y_below_bottom_finder = y_below_bottom_finder,
+                .alignment_patterns = parent.qr_code.alignment_positions.items,
             };
         }
 
@@ -605,6 +610,18 @@ pub const DataBitIter = struct {
 
         fn inTimerPattern(self: *const Helper) bool {
             return self.x == timer_pattern_offset or self.y == timer_pattern_offset;
+        }
+
+        fn inAlignmentPattern(self: *const Helper) bool {
+            for (self.alignment_patterns) |tl| {
+                const x_in_alignment = self.x >= tl.x and self.x < tl.x + alignment_pattern_size;
+                const y_in_alignment = self.y >= tl.y and self.y < tl.y + alignment_pattern_size;
+                if (x_in_alignment and y_in_alignment) {
+                    return true;
+                }
+            }
+
+            return false;
         }
     };
 
@@ -656,6 +673,10 @@ pub const DataBitIter = struct {
         // completely
         if (helper.inTimerPattern()) {
             return .continue_straight;
+        }
+
+        if (helper.inAlignmentPattern()) {
+            return .continue_zig_zag;
         }
 
         return .yield;
@@ -825,12 +846,123 @@ fn findElemSize(it: anytype, total_size: f32) f32 {
     return total_size / @as(f32, @floatFromInt(num_elems));
 }
 
+fn idxToRoi(roi: *const Rect, elem_width: f32, elem_height: f32, x: usize, y: usize) Rect {
+    const left = (@as(f32, @floatFromInt(x)) * elem_width) + roi.left;
+    const right = left + elem_width;
+    const top = (@as(f32, @floatFromInt(y)) * elem_height) + roi.top;
+    const bottom = top + elem_height;
+
+    return .{
+        .left = left,
+        .right = right,
+        .top = top,
+        .bottom = bottom,
+    };
+}
+
+pub const GridPoint = struct {
+    x: usize,
+    y: usize,
+};
+
+pub const AlignmentFinder = struct {
+    // Top left
+    x_pos: usize,
+    y_pos: usize,
+
+    qr_roi: Rect,
+    elem_width: f32,
+    elem_height: f32,
+    grid_width: usize,
+    grid_height: usize,
+    image: *Image,
+
+    const Output = struct {
+        tl: GridPoint,
+        roi: Rect,
+    };
+
+    pub fn init(
+        qr_roi: Rect,
+        elem_width: f32,
+        elem_height: f32,
+        grid_width: usize,
+        grid_height: usize,
+        image: *Image,
+    ) AlignmentFinder {
+        return .{
+            .qr_roi = qr_roi,
+            .elem_width = elem_width,
+            .elem_height = elem_height,
+            .grid_width = grid_width,
+            .grid_height = grid_height,
+            .image = image,
+            .x_pos = 0,
+            .y_pos = 0,
+        };
+    }
+
+    fn isAlignmentElement(self: *AlignmentFinder) bool {
+        for (0..alignment_pattern_size) |y_offs| {
+            for (0..alignment_pattern_size) |x_offs| {
+                const is_light = img.isLightRoi(&idxToRoi(
+                    &self.qr_roi,
+                    self.elem_width,
+                    self.elem_height,
+                    self.x_pos + x_offs,
+                    self.y_pos + y_offs,
+                ), self.image);
+
+                const should_be_light = ((y_offs == 1 or y_offs == 3) and x_offs > 0 and x_offs < 4) or
+                    ((x_offs == 1 or x_offs == 3) and y_offs > 0 and y_offs < 4);
+
+                if (is_light != should_be_light) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    pub fn next(self: *AlignmentFinder) ?Output {
+        while (true) {
+            if (self.y_pos >= self.grid_height - 3) {
+                return null;
+            }
+
+            defer {
+                self.x_pos += 1;
+                if (self.x_pos >= self.grid_width - 3) {
+                    self.x_pos = 0;
+                    self.y_pos += 1;
+                }
+            }
+
+            if (self.isAlignmentElement()) {
+                var roi = idxToRoi(&self.qr_roi, self.elem_width, self.elem_height, self.x_pos, self.y_pos);
+                roi.bottom += self.elem_height * 4;
+                roi.right += self.elem_width * 4;
+
+                return .{
+                    .tl = .{
+                        .x = self.x_pos,
+                        .y = self.y_pos,
+                    },
+                    .roi = roi,
+                };
+            }
+        }
+    }
+};
+
 pub const QrCode = struct {
     roi: Rect,
     elem_width: f32,
     elem_height: f32,
     grid_width: usize,
     grid_height: usize,
+    alignment_positions: std.ArrayList(GridPoint),
 
     pub fn init(alloc: Allocator, image: *Image) !QrCode {
         var finders = try findFinderPatterns(alloc, image);
@@ -872,27 +1004,41 @@ pub const QrCode = struct {
         var y_timing_iter = ImageTimingYPixelIter.init(image, &qr_rect, estimated_elem_width, estimated_elem_height, finder_height);
         const elem_height = findElemSize(&y_timing_iter, qr_rect.height());
 
+        const grid_width: usize = @intFromFloat(@round(qr_rect.width() / elem_width));
+        const grid_height: usize = @intFromFloat(@round(qr_rect.height() / elem_height));
+
+        var alignment_finder = AlignmentFinder.init(
+            qr_rect,
+            elem_width,
+            elem_height,
+            grid_width,
+            grid_height,
+            image,
+        );
+
+        var alignment_positions = std.ArrayList(GridPoint).init(alloc);
+        errdefer alignment_positions.deinit();
+
+        while (alignment_finder.next()) |item| {
+            try alignment_positions.append(item.tl);
+        }
+
         return .{
             .roi = qr_rect,
             .elem_width = elem_width,
             .elem_height = elem_height,
-            .grid_width = @intFromFloat(@round(qr_rect.width() / elem_width)),
-            .grid_height = @intFromFloat(@round(qr_rect.height() / elem_height)),
+            .grid_width = grid_width,
+            .grid_height = grid_height,
+            .alignment_positions = alignment_positions,
         };
     }
 
-    pub fn idxToRoi(self: *const QrCode, x: usize, y: usize) Rect {
-        const left = (@as(f32, @floatFromInt(x)) * self.elem_width) + self.roi.left;
-        const right = left + self.elem_width;
-        const top = (@as(f32, @floatFromInt(y)) * self.elem_height) + self.roi.top;
-        const bottom = top + self.elem_height;
+    pub fn deinit(self: *QrCode) void {
+        self.alignment_positions.deinit();
+    }
 
-        return .{
-            .left = left,
-            .right = right,
-            .top = top,
-            .bottom = bottom,
-        };
+    pub fn idxToRoi(self: *const QrCode, x: usize, y: usize) Rect {
+        return qr.idxToRoi(&self.roi, self.elem_width, self.elem_height, x, y);
     }
 
     pub fn horizTimings(self: *const QrCode) HorizTimingIter {
@@ -951,6 +1097,8 @@ test "hello world" {
     var alloc = std.testing.allocator;
     var image = try img.Image.fromArray(@embedFile("res/hello_world.gif"));
     var qr_code = try QrCode.init(alloc, &image);
+    defer qr_code.deinit();
+
     var it = try qr_code.data(&image);
     try std.testing.expectEqual(it.encoding, 4);
 
