@@ -304,6 +304,10 @@ pub fn mask_pattern_5(x: usize, y: usize) bool {
     return (((x * y) % 3) + x + y) % 2 == 0;
 }
 
+pub fn mask_pattern_6(x: usize, y: usize) bool {
+    return (x + y) % 3 == 0;
+}
+
 pub const HorizTimingIter = struct {
     qr_code: *const QrCode,
     x_pos: usize,
@@ -1079,8 +1083,9 @@ pub const QrCode = struct {
             0 => &mask_pattern_0,
             2 => &mask_pattern_2,
             5 => &mask_pattern_5,
+            6 => &mask_pattern_6,
             else => {
-                std.log.err("Unimplemented mask function", .{});
+                std.log.err("Unimplemented mask function {d} (0b{b})", .{ mask_val, mask_val });
                 return error.Unimplemented;
             },
         };
