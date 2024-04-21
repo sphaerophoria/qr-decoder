@@ -1071,7 +1071,7 @@ pub const QrCode = struct {
             };
 
             if (img.isLightRoi(&roi, image)) {
-                mask_val |= @as(@TypeOf(mask_val), 1) << @intCast(i);
+                mask_val |= @as(@TypeOf(mask_val), 1) << @intCast(3 - i);
             }
         }
 
