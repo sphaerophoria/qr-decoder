@@ -191,8 +191,8 @@ fn visualize(alloc: Allocator, image: *img.Image, input_path: []const u8, output
         }
 
         try visualizer.drawBox(item.roi, "orange", null);
-        var i_s = try std.fmt.allocPrint(alloc, "{d}", .{i});
-        defer alloc.free(i_s);
+        var buf: [5]u8 = undefined;
+        var i_s = try std.fmt.bufPrint(&buf, "{d}", .{i});
 
         try visualizer.drawText(item.roi.left + qr_code.elem_width / 3.0, item.roi.bottom - qr_code.elem_height / 3.0, "red", i_s);
         i += 1;
