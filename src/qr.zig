@@ -231,7 +231,6 @@ pub fn finderCandidates(alloc: Allocator, it: anytype) !std.ArrayList(FinderCand
     const end = rle.items.len - 5;
     for (0..end) |i| {
         const ref = rle.items[i].length;
-        // FIXME: Allow for any amount of error
         if (!isAlmostSame(rle.items[i + 1].length, ref)) {
             continue;
         }
@@ -749,6 +748,83 @@ pub const DataIter = struct {
     }
 };
 
+const ImageTimingXPixelIter = struct {
+    image: *img.Image,
+    timing_row_center_px: usize,
+    timing_x_pos: usize,
+    timing_iter_end: usize,
+
+    fn init(image: *img.Image, qr_rect: *const Rect, estimated_elem_width: f32, estimated_elem_height: f32, finder_width: f32) ImageTimingXPixelIter {
+        const timing_row_center_f = qr_rect.top + finder_num_elements * estimated_elem_height - estimated_elem_height / 2.0;
+        const timing_row_center_px: usize = @intFromFloat(@round(timing_row_center_f));
+        var timing_x_pos: usize = @intFromFloat(@round(qr_rect.left + finder_num_elements * estimated_elem_width - estimated_elem_width / 2.0));
+        const timing_iter_end: usize = @intFromFloat(@round(qr_rect.right - finder_width + estimated_elem_width / 2.0));
+
+        return .{
+            .image = image,
+            .timing_row_center_px = timing_row_center_px,
+            .timing_x_pos = timing_x_pos,
+            .timing_iter_end = timing_iter_end,
+        };
+    }
+
+    fn next(self: *ImageTimingXPixelIter) ?u8 {
+        if (self.timing_x_pos > self.timing_iter_end) {
+            return null;
+        }
+
+        const ret = self.image.get(self.timing_x_pos, self.timing_row_center_px);
+        self.timing_x_pos += 1;
+        return ret;
+    }
+};
+
+const ImageTimingYPixelIter = struct {
+    image: *img.Image,
+    timing_col_center_px: usize,
+    timing_y_pos: usize,
+    timing_iter_end: usize,
+
+    fn init(image: *img.Image, qr_rect: *const Rect, estimated_elem_width: f32, estimated_elem_height: f32, finder_height: f32) ImageTimingYPixelIter {
+        const timing_col_center_f = qr_rect.left + finder_num_elements * estimated_elem_width - estimated_elem_width / 2.0;
+        const timing_col_center_px: usize = @intFromFloat(@round(timing_col_center_f));
+        var timing_y_pos: usize = @intFromFloat(@round(qr_rect.top + finder_num_elements * estimated_elem_height - estimated_elem_height / 2.0));
+        const timing_iter_end: usize = @intFromFloat(@round(qr_rect.bottom - finder_height + estimated_elem_height / 2.0));
+
+        return .{
+            .image = image,
+            .timing_col_center_px = timing_col_center_px,
+            .timing_y_pos = timing_y_pos,
+            .timing_iter_end = timing_iter_end,
+        };
+    }
+
+    fn next(self: *ImageTimingYPixelIter) ?u8 {
+        if (self.timing_y_pos > self.timing_iter_end) {
+            return null;
+        }
+
+        const ret = self.image.get(self.timing_col_center_px, self.timing_y_pos);
+        self.timing_y_pos += 1;
+        return ret;
+    }
+};
+
+fn findElemSize(it: anytype, total_size: f32) f32 {
+    var last_is_light = img.isLightPixel(it.next().?);
+    var num_elems = finder_num_elements * 2 - 1;
+
+    while (it.next()) |val| {
+        var is_light = img.isLightPixel(val);
+        if (is_light != last_is_light) {
+            num_elems += 1;
+        }
+        last_is_light = is_light;
+    }
+
+    return total_size / @as(f32, @floatFromInt(num_elems));
+}
+
 pub const QrCode = struct {
     roi: Rect,
     elem_width: f32,
@@ -772,20 +848,29 @@ pub const QrCode = struct {
             .right = 0,
         };
 
-        var elem_width: f32 = 0;
-        var elem_height: f32 = 0;
+        var finder_width: f32 = 0;
+        var finder_height: f32 = 0;
 
         for (finders.items) |rect| {
-            elem_width += rect.width() / finder_num_elements;
-            elem_height += rect.height() / finder_num_elements;
+            finder_width += rect.width();
+            finder_height += rect.height();
             qr_rect.top = @min(qr_rect.top, rect.top);
             qr_rect.bottom = @max(qr_rect.bottom, rect.bottom);
             qr_rect.left = @min(qr_rect.left, rect.left);
             qr_rect.right = @max(qr_rect.right, rect.right);
         }
 
-        elem_width /= @floatFromInt(finders.items.len);
-        elem_height /= @floatFromInt(finders.items.len);
+        finder_width /= @floatFromInt(finders.items.len);
+        finder_height /= @floatFromInt(finders.items.len);
+
+        const estimated_elem_height = finder_height / finder_num_elements;
+        const estimated_elem_width = finder_width / finder_num_elements;
+
+        var x_timing_iter = ImageTimingXPixelIter.init(image, &qr_rect, estimated_elem_width, estimated_elem_height, finder_width);
+        const elem_width = findElemSize(&x_timing_iter, qr_rect.width());
+
+        var y_timing_iter = ImageTimingYPixelIter.init(image, &qr_rect, estimated_elem_width, estimated_elem_height, finder_height);
+        const elem_height = findElemSize(&y_timing_iter, qr_rect.height());
 
         return .{
             .roi = qr_rect,
