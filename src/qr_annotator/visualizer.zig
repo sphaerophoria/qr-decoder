@@ -3,7 +3,7 @@ const libqr = @import("libqr");
 const xml = @import("xml.zig");
 const types_2d = libqr.types_2d;
 const Allocator = std.mem.Allocator;
-const Rect = types_2d.Rect;
+const Rect = types_2d.Rect(f32);
 
 pub fn Visualizer(comptime Writer: type) type {
     return struct {

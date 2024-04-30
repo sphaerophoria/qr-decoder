@@ -54,16 +54,6 @@ fn setupQrAnnotator(
     exe.linkLibC();
     b.installArtifact(exe);
 
-    const run_cmd = b.addRunArtifact(exe);
-    run_cmd.step.dependOn(b.getInstallStep());
-
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
-
-    const run_step = b.step("run", "Run the app");
-    run_step.dependOn(&run_cmd.step);
-
     const main_unit_tests = b.addTest(.{
         .root_source_file = .{ .path = "src/qr_annotator/main.zig" },
         .target = target,
@@ -77,6 +67,53 @@ fn setupQrAnnotator(
     test_step.dependOn(&run_main_unit_tests.step);
 }
 
+fn setupBinarizationDebug(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    libqr: *std.Build.Module,
+    test_step: *std.Build.Step,
+) void {
+    const generate_embedded_resources = b.addExecutable(.{
+        .name = "generate_embedded_resources",
+        .root_source_file = .{ .path = "tools/generate_embedded_resources.zig" },
+        .target = b.host,
+    });
+
+    const generate_embedded_resources_step = b.addRunArtifact(generate_embedded_resources);
+    generate_embedded_resources_step.addDirectoryArg(b.path("src/binarization_debug/res"));
+    const output = generate_embedded_resources_step.addOutputFileArg("resources.zig");
+    _ = generate_embedded_resources_step.addDepFileOutputArg("deps.d");
+
+    const exe = b.addExecutable(.{
+        .name = "binarization-debug",
+        // In this case the main source file is merely a path, however, in more
+        // complicated build scripts, this could be a generated file.
+        .root_source_file = .{ .path = "src/binarization_debug/main.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    exe.root_module.addImport("libqr", libqr);
+    exe.root_module.addAnonymousImport("resources", .{ .root_source_file = output });
+    exe.linkLibC();
+    b.installArtifact(exe);
+
+    const unit_tests = b.addTest(.{
+        .root_source_file = .{ .path = "src/binarization_debug/main.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    unit_tests.root_module.addImport("libqr", libqr);
+    unit_tests.root_module.addAnonymousImport("resources", .{ .root_source_file = output });
+    unit_tests.linkLibC();
+
+    const run_unit_tests = b.addRunArtifact(unit_tests);
+
+    test_step.dependOn(&run_unit_tests.step);
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -84,4 +121,5 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     const libqr = setupLibQr(b, target, optimize, test_step);
     setupQrAnnotator(b, target, optimize, libqr, test_step);
+    setupBinarizationDebug(b, target, optimize, libqr, test_step);
 }

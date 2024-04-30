@@ -1,33 +1,37 @@
-pub const Rect = struct {
-    top: f32,
-    bottom: f32,
-    left: f32,
-    right: f32,
+pub fn Rect(comptime T: type) type {
+    return struct {
+        top: T,
+        bottom: T,
+        left: T,
+        right: T,
 
-    pub fn initCenterSize(cx_: f32, cy_: f32, width_: f32, height_: f32) Rect {
-        const half_width: f32 = width_ / 2.0;
-        const half_height: f32 = height_ / 2.0;
-        return .{
-            .top = cy_ - half_height,
-            .bottom = cy_ + half_height,
-            .right = cx_ + half_width,
-            .left = cx_ - half_width,
-        };
-    }
+        const Self = @This();
 
-    pub fn height(self: *const Rect) f32 {
-        return self.bottom - self.top;
-    }
+        pub fn initCenterSize(cx_: T, cy_: T, width_: T, height_: T) Self {
+            const half_width: T = width_ / 2.0;
+            const half_height: T = height_ / 2.0;
+            return .{
+                .top = cy_ - half_height,
+                .bottom = cy_ + half_height,
+                .right = cx_ + half_width,
+                .left = cx_ - half_width,
+            };
+        }
 
-    pub fn width(self: *const Rect) f32 {
-        return self.right - self.left;
-    }
+        pub fn height(self: *const Self) T {
+            return self.bottom - self.top;
+        }
 
-    pub fn cx(self: *const Rect) f32 {
-        return (self.left + self.right) / 2.0;
-    }
+        pub fn width(self: *const Self) T {
+            return self.right - self.left;
+        }
 
-    pub fn cy(self: *const Rect) f32 {
-        return (self.top + self.bottom) / 2.0;
-    }
-};
+        pub fn cx(self: *const Self) T {
+            return (self.left + self.right) / 2;
+        }
+
+        pub fn cy(self: *const Self) T {
+            return (self.top + self.bottom) / 2;
+        }
+    };
+}

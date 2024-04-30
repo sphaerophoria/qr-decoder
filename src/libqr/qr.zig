@@ -1,7 +1,7 @@
 const std = @import("std");
 const img = @import("img.zig");
 const types_2d = @import("types_2d.zig");
-const Rect = types_2d.Rect;
+const Rect = types_2d.Rect(f32);
 const Image = img.Image;
 
 const Allocator = std.mem.Allocator;

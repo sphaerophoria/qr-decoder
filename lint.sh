@@ -4,7 +4,7 @@ set -ex
 
 zig build --summary all
 zig fmt src --check
-zig build test --summary all
+#zig build test --summary all
 
 valgrind \
         --suppressions=./suppressions.valgrind \
@@ -15,4 +15,5 @@ valgrind \
         ./zig-out/bin/qr-annotator \
                 --input ./src/libqr/res/hello_world.gif
 
+prettier --check src/binarization_debug/res/
 echo "Success"

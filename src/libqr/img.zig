@@ -1,5 +1,7 @@
+const std = @import("std");
 const types_2d = @import("types_2d.zig");
-const Rect = types_2d.Rect;
+const Rect = types_2d.Rect(f32);
+const Allocator = std.mem.Allocator;
 
 const c = @cImport({
     @cInclude("stb_image.h");
@@ -51,7 +53,7 @@ pub const HorizIter = struct {
     line: []const u8,
     i: usize,
 
-    pub fn init(image: [*]u8, width: usize, y: usize) HorizIter {
+    pub fn init(image: []u8, width: usize, y: usize) HorizIter {
         const start = width * y;
         const end = start + width;
         const line = image[start..end];
@@ -60,6 +62,10 @@ pub const HorizIter = struct {
             .line = line,
             .i = 0,
         };
+    }
+
+    pub fn skip(self: *HorizIter, n: usize) void {
+        self.i += n;
     }
 
     pub fn next(self: *HorizIter) ?u8 {
@@ -78,7 +84,7 @@ pub const VertIter = struct {
     idx: usize,
     width: usize,
 
-    pub fn init(image: [*]u8, width: usize, height: usize, x: usize) VertIter {
+    pub fn init(image: []u8, width: usize, height: usize, x: usize) VertIter {
         return .{
             .image = image[0 .. width * height],
             .idx = x,
@@ -97,21 +103,82 @@ pub const VertIter = struct {
     }
 };
 
+pub fn extractImageFromRoi(alloc: *const Allocator, input_image: *Image, roi: Rect) !Image {
+    const start_y: usize = @intFromFloat(@ceil(roi.top));
+    const end_y: usize = @intFromFloat(@floor(roi.bottom));
+    const start_x: usize = @intFromFloat(@ceil(roi.left));
+    const end_x: usize = @intFromFloat(@floor(roi.right));
+    const width = end_x - start_x;
+    const height = end_y - start_y;
+
+    if (width == 0 or height == 0) {
+        std.log.err("roi is 0 sized", .{});
+        return error.InvalidData;
+    }
+
+    const output = try alloc.alloc(u8, width * height);
+    errdefer alloc.free(output);
+
+    var i: usize = 0;
+    for (start_y..end_y) |in_y| {
+        defer i += 1;
+        const out_start = i * width;
+        var in_it = input_image.row(in_y);
+        in_it.skip(start_x);
+        for (0..width) |out_x| {
+            output[out_start + out_x] = in_it.next().?;
+        }
+    }
+
+    return Image.fromLuma(
+        output,
+        width,
+        height,
+        freeImage,
+        @constCast(alloc),
+    );
+}
+
+test "image extraction" {
+    return error.Unimplemented;
+}
+
+pub fn freeImage(context: ?*anyopaque, data: []u8) void {
+    const alloc: *const Allocator = @ptrCast(@alignCast(context));
+    alloc.free(data);
+}
+
+fn free_with_stbi(_: ?*anyopaque, data: []u8) void {
+    c.stbi_image_free(data.ptr);
+}
+
+const ImageFreeFn = *const fn (?*anyopaque, []u8) void;
+
 pub const Image = struct {
     width: usize,
     height: usize,
-    data: [*]u8,
+    data: []u8,
+    free_fn: ImageFreeFn,
+    free_context: ?*anyopaque = null,
 
     pub fn open(path: [:0]const u8) !Image {
         var img_width_c: c_int = undefined;
         var img_height_c: c_int = undefined;
         var num_channels: c_int = undefined;
         const data = c.stbi_load(path, &img_width_c, &img_height_c, &num_channels, 1);
+        if (data == null) {
+            const reason = c.stbi_failure_reason();
+            std.log.err("failed to load image: {s}", .{reason});
+            return error.InvalidData;
+        }
 
+        const width: usize = @intCast(img_width_c);
+        const height: usize = @intCast(img_height_c);
         return .{
-            .width = @intCast(img_width_c),
-            .height = @intCast(img_height_c),
-            .data = data,
+            .width = width,
+            .height = height,
+            .data = data[0 .. width * height],
+            .free_fn = free_with_stbi,
         };
     }
 
@@ -120,16 +187,38 @@ pub const Image = struct {
         var img_height_c: c_int = undefined;
         var num_channels: c_int = undefined;
         const data = c.stbi_load_from_memory(input.ptr, @intCast(input.len), &img_width_c, &img_height_c, &num_channels, 1);
+        if (data == null) {
+            const reason = c.stbi_failure_reason();
+            std.log.err("failed to load image: {s}", .{reason});
+            return error.InvalidData;
+        }
 
+        const width: usize = @intCast(img_width_c);
+        const height: usize = @intCast(img_height_c);
         return .{
-            .width = @intCast(img_width_c),
-            .height = @intCast(img_height_c),
+            .width = width,
+            .height = height,
+            .data = data[0 .. width * height],
+            .free_fn = free_with_stbi,
+        };
+    }
+
+    pub fn fromLuma(data: []u8, width: usize, height: usize, free_fn: ImageFreeFn, free_context: ?*anyopaque) Image {
+        return .{
+            .width = width,
+            .height = height,
             .data = data,
+            .free_fn = free_fn,
+            .free_context = free_context,
         };
     }
 
     pub fn deinit(self: *Image) void {
-        c.stbi_image_free(self.data);
+        self.free_fn(self.free_context, self.data);
+    }
+
+    pub fn set(self: *Image, x: usize, y: usize, val: u8) void {
+        self.data[y * self.width + x] = val;
     }
 
     pub fn get(self: *Image, x: usize, y: usize) u8 {

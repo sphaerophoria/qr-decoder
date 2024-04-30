@@ -15,6 +15,9 @@ pkgs.mkShell {
     valgrind
     # For linter script on push hook
     python3
+    nodePackages.typescript-language-server
+    vscode-langservers-extracted
+    nodePackages.prettier
   ];
 }
 
