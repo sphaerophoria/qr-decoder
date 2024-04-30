@@ -1,10 +1,11 @@
 const std = @import("std");
 const xml = @import("xml.zig");
 const Allocator = std.mem.Allocator;
-const img = @import("img.zig");
 const vis = @import("visualizer.zig");
-const qr = @import("qr.zig");
-const types_2d = @import("types_2d.zig");
+const libqr = @import("libqr");
+const qr = libqr.qr;
+const img = libqr.img;
+const types_2d = libqr.types_2d;
 const Rect = types_2d.Rect;
 
 const ArgsHelper = struct {
@@ -250,5 +251,5 @@ pub fn main() !void {
 }
 
 test {
-    std.testing.refAllDecls(@This());
+    std.testing.refAllDeclsRecursive(@This());
 }

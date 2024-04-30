@@ -1,6 +1,7 @@
 const std = @import("std");
+const libqr = @import("libqr");
 const xml = @import("xml.zig");
-const types_2d = @import("types_2d.zig");
+const types_2d = libqr.types_2d;
 const Allocator = std.mem.Allocator;
 const Rect = types_2d.Rect;
 

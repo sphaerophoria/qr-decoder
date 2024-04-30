@@ -1,6 +1,5 @@
 const std = @import("std");
 const img = @import("img.zig");
-const vis = @import("visualizer.zig");
 const types_2d = @import("types_2d.zig");
 const Rect = types_2d.Rect;
 const Image = img.Image;
