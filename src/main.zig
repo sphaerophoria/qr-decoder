@@ -14,8 +14,8 @@ const ArgsHelper = struct {
 
     fn init(alloc: Allocator) !ArgsHelper {
         var it = try std.process.argsWithAllocator(alloc);
-        var process_name = it.next() orelse "qr-decoder";
-        var stderr = std.io.getStdErr().writer();
+        const process_name = it.next() orelse "qr-decoder";
+        const stderr = std.io.getStdErr().writer();
         return .{
             .it = it,
             .process_name = process_name,
@@ -67,7 +67,7 @@ const Args = struct {
             }
         }
 
-        var input = input_opt orelse {
+        const input = input_opt orelse {
             helper.print("--input not provided\n", .{});
             helper.help();
         };
@@ -207,7 +207,7 @@ fn visualize(alloc: Allocator, image: *img.Image, input_path: []const u8, output
 
         try visualizer.drawBox(item.roi, "orange", null);
         var buf: [5]u8 = undefined;
-        var i_s = try std.fmt.bufPrint(&buf, "{d}", .{i});
+        const i_s = try std.fmt.bufPrint(&buf, "{d}", .{i});
 
         try visualizer.drawText(item.roi.left + qr_code.elem_width / 3.0, item.roi.bottom - qr_code.elem_height / 3.0, "red", i_s);
         i += 1;
@@ -219,7 +219,7 @@ pub fn main() !void {
         .stack_trace_frames = 99,
     }){};
     defer _ = gpa.deinit();
-    var alloc = gpa.allocator();
+    const alloc = gpa.allocator();
 
     var args = try Args.parse(alloc);
     defer args.deinit();

@@ -3,6 +3,6 @@
    Memcheck:Param
    msync(start)
    fun:msync
-   fun:os.msync
+   fun:posix.msync
    fun:debug.StackIterator.isValidMemory
 }

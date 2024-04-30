@@ -71,7 +71,7 @@ pub const DetectFinderAlgo = struct {
             defer candidates.deinit();
 
             for (candidates.items) |candidate| {
-                var cx = @as(f32, @floatFromInt(x)) + 0.5;
+                const cx = @as(f32, @floatFromInt(x)) + 0.5;
                 try vertical_candidates.append(Rect.initCenterSize(cx, candidate.center, 0.0, candidate.length));
             }
         }
@@ -93,7 +93,7 @@ pub const DetectFinderAlgo = struct {
             defer candidates.deinit();
 
             for (candidates.items) |candidate| {
-                var cy = @as(f32, @floatFromInt(y)) + 0.5;
+                const cy = @as(f32, @floatFromInt(y)) + 0.5;
                 try horizontal_candidates.append(Rect.initCenterSize(candidate.center, cy, candidate.length, 0));
             }
         }
@@ -112,18 +112,18 @@ pub const DetectFinderAlgo = struct {
 
     fn detectCombinedCandidates(self: *DetectFinderAlgo) !?Output {
         var buckets = std.ArrayList(std.ArrayList(Rect)).init(self.arena.allocator());
-        var vert_candidates = self.state.detect_combined_candidates.vert_candidates;
-        var horiz_candidates = self.state.detect_combined_candidates.horiz_candidates;
+        const vert_candidates = self.state.detect_combined_candidates.vert_candidates;
+        const horiz_candidates = self.state.detect_combined_candidates.horiz_candidates;
 
         for (vert_candidates.items) |vert_candidate| {
             for (horiz_candidates.items) |horiz_candidate| {
                 if (rectCentersEql(&vert_candidate, &horiz_candidate, 1.0)) {
-                    var cx = (vert_candidate.cx() + horiz_candidate.cx()) / 2.0;
-                    var cy = (vert_candidate.cy() + horiz_candidate.cy()) / 2.0;
-                    var width = horiz_candidate.width();
-                    var height = vert_candidate.height();
+                    const cx = (vert_candidate.cx() + horiz_candidate.cx()) / 2.0;
+                    const cy = (vert_candidate.cy() + horiz_candidate.cy()) / 2.0;
+                    const width = horiz_candidate.width();
+                    const height = vert_candidate.height();
 
-                    var combined = Rect.initCenterSize(cx, cy, width, height);
+                    const combined = Rect.initCenterSize(cx, cy, width, height);
 
                     try addRectToBucket(&buckets, combined);
                 }
@@ -140,7 +140,7 @@ pub const DetectFinderAlgo = struct {
     }
 
     pub fn detectRois(self: *DetectFinderAlgo) !?Output {
-        var buckets = self.state.rois.candidates;
+        const buckets = self.state.rois.candidates;
 
         var ret = std.ArrayList(Rect).init(self.output_alloc);
         errdefer ret.deinit();
@@ -214,7 +214,7 @@ fn isAlmostSame(a: usize, b: usize) bool {
     const a_f: f32 = @floatFromInt(a);
     const b_f: f32 = @floatFromInt(b);
 
-    return @fabs(a_f / b_f - 1.0) < 0.2;
+    return @abs(a_f / b_f - 1.0) < 0.2;
 }
 
 /// Find potential pixel positions for the center of the qr finder pattern in 1 dimension.
@@ -251,7 +251,7 @@ pub fn finderCandidates(alloc: Allocator, it: anytype) !std.ArrayList(FinderCand
 
         const center_block_length: f32 = @floatFromInt(rle.items[i + 2].length);
         const center_block_start: f32 = @floatFromInt(rle.items[i + 2].start);
-        var center = center_block_start + center_block_length / 2;
+        const center = center_block_start + center_block_length / 2;
 
         const first = rle.items[i];
         const last = rle.items[i + 4];
@@ -722,7 +722,7 @@ test "bit collector" {
 
 fn collectBits(collector: anytype, it: *DataBitIter) !@TypeOf(collector.val) {
     while (true) {
-        var item = it.next() orelse {
+        const item = it.next() orelse {
             std.log.err("data stream ended early\n", .{});
             return error.InvalidData;
         };
@@ -744,10 +744,10 @@ pub const DataIter = struct {
         var bit_iter = bit_iter_in;
 
         var encoding_collector = BitCollector(u4, u2){};
-        var encoding = try collectBits(&encoding_collector, &bit_iter);
+        const encoding = try collectBits(&encoding_collector, &bit_iter);
 
         var u8_collector = BitCollector(u8, u3){};
-        var length: u8 = try collectBits(&u8_collector, &bit_iter);
+        const length: u8 = try collectBits(&u8_collector, &bit_iter);
 
         return .{
             .bit_iter = bit_iter,
@@ -782,7 +782,7 @@ const ImageTimingXPixelIter = struct {
     fn init(image: *img.Image, qr_rect: *const Rect, estimated_elem_width: f32, estimated_elem_height: f32, finder_width: f32) ImageTimingXPixelIter {
         const timing_row_center_f = qr_rect.top + finder_num_elements * estimated_elem_height - estimated_elem_height / 2.0;
         const timing_row_center_px: usize = @intFromFloat(@round(timing_row_center_f));
-        var timing_x_pos: usize = @intFromFloat(@round(qr_rect.left + finder_num_elements * estimated_elem_width - estimated_elem_width / 2.0));
+        const timing_x_pos: usize = @intFromFloat(@round(qr_rect.left + finder_num_elements * estimated_elem_width - estimated_elem_width / 2.0));
         const timing_iter_end: usize = @intFromFloat(@round(qr_rect.right - finder_width + estimated_elem_width / 2.0));
 
         return .{
@@ -813,7 +813,7 @@ const ImageTimingYPixelIter = struct {
     fn init(image: *img.Image, qr_rect: *const Rect, estimated_elem_width: f32, estimated_elem_height: f32, finder_height: f32) ImageTimingYPixelIter {
         const timing_col_center_f = qr_rect.left + finder_num_elements * estimated_elem_width - estimated_elem_width / 2.0;
         const timing_col_center_px: usize = @intFromFloat(@round(timing_col_center_f));
-        var timing_y_pos: usize = @intFromFloat(@round(qr_rect.top + finder_num_elements * estimated_elem_height - estimated_elem_height / 2.0));
+        const timing_y_pos: usize = @intFromFloat(@round(qr_rect.top + finder_num_elements * estimated_elem_height - estimated_elem_height / 2.0));
         const timing_iter_end: usize = @intFromFloat(@round(qr_rect.bottom - finder_height + estimated_elem_height / 2.0));
 
         return .{
@@ -840,7 +840,7 @@ fn findElemSize(it: anytype, total_size: f32) f32 {
     var num_elems = finder_num_elements * 2 - 1;
 
     while (it.next()) |val| {
-        var is_light = img.isLightPixel(val);
+        const is_light = img.isLightPixel(val);
         if (is_light != last_is_light) {
             num_elems += 1;
         }
@@ -1079,7 +1079,7 @@ pub const QrCode = struct {
             }
         }
 
-        var mask_fn = switch (mask_val) {
+        const mask_fn = switch (mask_val) {
             0 => &mask_pattern_0,
             2 => &mask_pattern_2,
             5 => &mask_pattern_5,
@@ -1099,7 +1099,7 @@ pub const QrCode = struct {
 };
 
 test "hello world" {
-    var alloc = std.testing.allocator;
+    const alloc = std.testing.allocator;
     var image = try img.Image.fromArray(@embedFile("res/hello_world.gif"));
     var qr_code = try QrCode.init(alloc, &image);
     defer qr_code.deinit();
@@ -1158,7 +1158,7 @@ fn runLengthEncode(alloc: Allocator, it: anytype) !std.ArrayList(RleItem) {
 }
 
 test "run length encode sanity" {
-    var alloc = std.testing.allocator;
+    const alloc = std.testing.allocator;
     const BufIter = struct {
         buf: []const u8,
         i: usize,
@@ -1170,7 +1170,7 @@ test "run length encode sanity" {
                 return null;
             }
 
-            var ret = self.buf[self.i];
+            const ret = self.buf[self.i];
             self.i += 1;
             return ret;
         }

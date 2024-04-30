@@ -82,14 +82,14 @@ pub fn XmlBuilder(comptime Writer: type) type {
         }
 
         pub fn finishNode(self: *Self) XmlError!void {
-            var tag_opt = self.tag_stack.popOrNull();
+            const tag_opt = self.tag_stack.popOrNull();
             switch (self.state) {
                 .attribute => {
                     try self.writer.print(" />\n", .{});
                     self.state = .other;
                 },
                 .other => {
-                    var tag = tag_opt orelse {
+                    const tag = tag_opt orelse {
                         std.log.err("No child node to close", .{});
                         return XmlError.InvalidState;
                     };

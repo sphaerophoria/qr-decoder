@@ -32,10 +32,10 @@ pub fn isLightIter(it: anytype) IsLightIter(@TypeOf(it)) {
 }
 
 pub fn isLightRoi(roi: *const Rect, image: *Image) bool {
-    var start_y: usize = @intFromFloat(@ceil(roi.top));
-    var end_y: usize = @intFromFloat(@floor(roi.bottom));
-    var start_x: usize = @intFromFloat(@ceil(roi.left));
-    var end_x: usize = @intFromFloat(@floor(roi.right));
+    const start_y: usize = @intFromFloat(@ceil(roi.top));
+    const end_y: usize = @intFromFloat(@floor(roi.bottom));
+    const start_x: usize = @intFromFloat(@ceil(roi.left));
+    const end_x: usize = @intFromFloat(@floor(roi.right));
 
     var val: usize = 0;
     for (start_y..end_y) |y| {
@@ -106,7 +106,7 @@ pub const Image = struct {
         var img_width_c: c_int = undefined;
         var img_height_c: c_int = undefined;
         var num_channels: c_int = undefined;
-        var data = c.stbi_load(path, &img_width_c, &img_height_c, &num_channels, 1);
+        const data = c.stbi_load(path, &img_width_c, &img_height_c, &num_channels, 1);
 
         return .{
             .width = @intCast(img_width_c),
@@ -119,7 +119,7 @@ pub const Image = struct {
         var img_width_c: c_int = undefined;
         var img_height_c: c_int = undefined;
         var num_channels: c_int = undefined;
-        var data = c.stbi_load_from_memory(input.ptr, @intCast(input.len), &img_width_c, &img_height_c, &num_channels, 1);
+        const data = c.stbi_load_from_memory(input.ptr, @intCast(input.len), &img_width_c, &img_height_c, &num_channels, 1);
 
         return .{
             .width = @intCast(img_width_c),

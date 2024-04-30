@@ -1,9 +1,9 @@
 const std = @import("std");
 
-fn setupDeps(exe: anytype) void {
-    exe.addIncludePath(std.Build.LazyPath.relative("src"));
+fn setupDeps(b: *std.Build, exe: anytype) void {
+    exe.addIncludePath(b.path("src"));
     exe.addCSourceFile(.{
-        .file = std.Build.LazyPath.relative("src/stb_image_impl.c"),
+        .file = b.path("src/stb_image_impl.c"),
         .flags = &[_][]const u8{},
     });
     exe.linkLibC();
@@ -32,7 +32,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    setupDeps(exe);
+    setupDeps(b, exe);
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
@@ -69,7 +69,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    setupDeps(unit_tests);
+    setupDeps(b, unit_tests);
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
 
