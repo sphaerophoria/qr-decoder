@@ -42,11 +42,20 @@ pub const DetectFinderAlgo = struct {
     image: *img.Image,
     state: DetectFinderAlgoState,
 
+    pub const FinderIndexes = struct {
+        tl: usize,
+        tr: usize,
+        bl: usize,
+    };
+
     pub const Output = union(enum) {
         vert_candidates: []const Rect,
         horiz_candidates: []const Rect,
         combined_candidates: []const std.ArrayList(Rect),
-        rois: []const Rect,
+        rois: struct {
+            rois: []const Rect,
+            ids: FinderIndexes,
+        },
     };
 
     pub fn init(alloc: Allocator, image: *img.Image) DetectFinderAlgo {
@@ -138,6 +147,129 @@ pub const DetectFinderAlgo = struct {
         };
     }
 
+    fn findTopLeftFinder(rois: []const Rect) usize {
+        // Assume the finders are in the orientation
+        // o---o
+        // | /
+        // o
+        //
+        // In this scenario the longest line connects the right and bottom
+        // points, and the top left point is the remaining one
+
+        var tl_finder: usize = undefined;
+        var longest_line_len: f32 = 0;
+
+        for (0..rois.len) |i| {
+            for (i + 1..rois.len) |j| {
+                const a = rois[i];
+                const b = rois[j];
+                const x_dist = b.cx() - a.cx();
+                const y_dist = b.cy() - a.cy();
+                const this_line_len = x_dist * x_dist + y_dist * y_dist;
+                if (this_line_len > longest_line_len) {
+                    longest_line_len = this_line_len;
+
+                    // Find the point _not_ participating in this line
+                    for (0..rois.len) |k| {
+                        if (k != i and k != j) {
+                            tl_finder = k;
+                        }
+                    }
+                }
+            }
+        }
+
+        return tl_finder;
+    }
+
+    fn cross_z(x1: f32, y1: f32, x2: f32, y2: f32) f32 {
+        return x1 * y2 - x2 * y1;
+    }
+
+    fn adjustRoiWHForRot(roi: *Rect) void {
+        // Width and height is in axis aligned space. We need to reduce the
+        // width so that after rotation it's the same
+        //
+        // What we end up measuring is not really obvious, if we draw a line
+        // along the x axis of the image, we measure the distance where that
+        // line enters and exits the finder
+        //
+        // If we draw this out...
+        //
+        //              _
+        //           _-^ \
+        //        _-^     \
+        // _______\________\________
+        // ________\________\_______
+        //          \    _-^
+        //           \_-^
+        //
+        // Note how the second line creates a right angle triangle where the
+        // hypotenuse is what we measured. If we look at those angles we can
+        // see that the actual width is related to the measured value and the
+        // cosine of the rotation
+
+        const rotation_rad = std.math.degreesToRadians(roi.rotation_deg);
+        const cos_theta = std.math.cos(rotation_rad);
+
+        const new_width = @abs(roi.width() * cos_theta);
+        const width_reduction = roi.width() - new_width;
+
+        const new_height = @abs(roi.height() * cos_theta);
+        const height_reduction = roi.height() - new_height;
+
+        roi.bottom -= height_reduction / 2;
+        roi.top += height_reduction / 2;
+        roi.left += width_reduction / 2;
+        roi.right -= width_reduction / 2;
+    }
+
+    fn adjustRoiRotation(rois: []Rect) FinderIndexes {
+        if (rois.len != 3) {
+            std.log.warn("Failed to detect roi rotation, need exactly 3 rois", .{});
+        }
+
+        var tl_finder = findTopLeftFinder(rois);
+        if (tl_finder != 0) {
+            // This makes things easier down the line, we can iterate the other
+            // two points without worrying about checking if idx == tl_finder
+            std.mem.swap(Rect, &rois[0], &rois[tl_finder]);
+            tl_finder = 0;
+        }
+
+        const Vec = struct {
+            x: f32,
+            y: f32,
+        };
+        const a: Vec = .{
+            .x = rois[1].cx() - rois[0].cx(),
+            .y = rois[1].cy() - rois[0].cy(),
+        };
+        const b: Vec = .{
+            .x = rois[2].cx() - rois[0].cx(),
+            .y = rois[2].cy() - rois[0].cy(),
+        };
+        var x_vec: Vec = undefined;
+        if (cross_z(a.x, a.y, b.x, b.y) > 0) {
+            x_vec = a;
+        } else {
+            x_vec = b;
+            std.mem.swap(Rect, &rois[1], &rois[2]);
+        }
+
+        const rotation_deg = std.math.atan2(x_vec.y, x_vec.x) * 180.0 / std.math.pi;
+        for (rois) |*roi| {
+            roi.rotation_deg = rotation_deg;
+            adjustRoiWHForRot(roi);
+        }
+
+        return .{
+            .tl = 0,
+            .tr = 1,
+            .bl = 2,
+        };
+    }
+
     pub fn detectRois(self: *DetectFinderAlgo) !?Output {
         const buckets = self.state.rois.candidates;
 
@@ -165,12 +297,17 @@ pub const DetectFinderAlgo = struct {
             ));
         }
 
+        const ids = adjustRoiRotation(ret.items);
+
         self.state = .{
             .finished = ret,
         };
 
         return .{
-            .rois = ret.items,
+            .rois = .{
+                .rois = ret.items,
+                .ids = ids,
+            },
         };
     }
 
@@ -213,7 +350,7 @@ fn isAlmostSame(a: usize, b: usize) bool {
     const a_f: f32 = @floatFromInt(a);
     const b_f: f32 = @floatFromInt(b);
 
-    return @abs(a_f / b_f - 1.0) < 0.2;
+    return @abs(a_f - b_f) / a_f < 0.3;
 }
 
 /// Find potential pixel positions for the center of the qr finder pattern in 1 dimension.

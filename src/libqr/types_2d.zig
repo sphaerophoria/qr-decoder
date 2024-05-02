@@ -4,6 +4,7 @@ pub fn Rect(comptime T: type) type {
         bottom: T,
         left: T,
         right: T,
+        rotation_deg: f32 = 0,
 
         const Self = @This();
 

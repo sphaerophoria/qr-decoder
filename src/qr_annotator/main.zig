@@ -85,6 +85,10 @@ const Args = struct {
     }
 };
 
+fn cross(x1: f32, y1: f32, x2: f32, y2: f32) f32 {
+    return x1 * y2 - x2 * y1;
+}
+
 fn visualizeFinderState(alloc: Allocator, image: *img.Image, visualizer: anytype) !void {
     var detector_finder_algo = qr.DetectFinderAlgo.init(alloc, image);
     defer {
@@ -115,9 +119,27 @@ fn visualizeFinderState(alloc: Allocator, image: *img.Image, visualizer: anytype
                 }
             },
             .rois => |rois| {
-                for (rois) |roi| {
-                    try visualizer.drawBox(roi, "yellow", null);
-                }
+                try visualizer.drawBox(rois.rois[rois.ids.tl], "yellow", null);
+                try visualizer.drawBox(rois.rois[rois.ids.tr], "red", null);
+                try visualizer.drawBox(rois.rois[rois.ids.bl], "blue", null);
+                // An approximation of the center of the QR code is the center
+                // of the line between the top right and bottom left finders.
+                // We can draw our axis here
+                const mid_x = (rois.rois[rois.ids.tr].cx() + rois.rois[rois.ids.bl].cx()) / 2;
+                const mid_y = (rois.rois[rois.ids.tr].cy() + rois.rois[rois.ids.bl].cy()) / 2;
+
+                const rotation_rad = rois.rois[rois.ids.tl].rotation_deg * std.math.pi / 180.0;
+                const axis_multiplier = 1000;
+                const x_axis_x = axis_multiplier * std.math.cos(rotation_rad);
+                const x_axis_y = axis_multiplier * std.math.sin(rotation_rad);
+                try visualizer.drawLine(mid_x, mid_y, mid_x + x_axis_x, mid_y + x_axis_y, "red");
+
+                // NOTE: x/y signs may seem flipped here. In image space Y is 0
+                // in the top left, increasing as we move down. In human brain
+                // space, we like Y to be up, so we flip the directions here
+                const y_axis_x = axis_multiplier * std.math.sin(rotation_rad);
+                const y_axis_y = -axis_multiplier * std.math.cos(rotation_rad);
+                try visualizer.drawLine(mid_x, mid_y, mid_x + y_axis_x, mid_y + y_axis_y, "blue");
             },
         }
     }
@@ -155,6 +177,10 @@ fn visualize(alloc: Allocator, image: *img.Image, input_path: []const u8, output
     defer visualizer.finish() catch {};
 
     try visualizeFinderState(alloc, image, &visualizer);
+
+    if (true) {
+        return;
+    }
 
     var qr_code = try qr.QrCode.init(alloc, image);
     defer qr_code.deinit();
@@ -234,6 +260,9 @@ pub fn main() !void {
         try visualize(alloc, &image, args.input, output_dir);
     }
 
+    if (true) {
+        return;
+    }
     var qr_code = try qr.QrCode.init(alloc, &image);
     defer qr_code.deinit();
 

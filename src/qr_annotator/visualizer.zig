@@ -35,13 +35,24 @@ pub fn Visualizer(comptime Writer: type) type {
 
             return .{
                 .svg_builder = svg_builder,
-                .stroke_width = @as(f32, @floatFromInt(width)) / 1000.0,
+                .stroke_width = @as(f32, @floatFromInt(width)) / 500.0,
                 .font_size = @as(f32, @floatFromInt(width)) / 50.0,
             };
         }
 
         pub fn finish(self: *Self) !void {
             try self.svg_builder.finish();
+        }
+
+        pub fn drawLine(self: *Self, x1: f32, y1: f32, x2: f32, y2: f32, stroke: []const u8) !void {
+            try self.svg_builder.addNode("line");
+            try self.svg_builder.addAttributeNum("x1", x1);
+            try self.svg_builder.addAttributeNum("x2", x2);
+            try self.svg_builder.addAttributeNum("y1", y1);
+            try self.svg_builder.addAttributeNum("y2", y2);
+            try self.svg_builder.addAttribute("stroke", stroke);
+            try self.svg_builder.addAttributeNum("stroke-width", self.stroke_width);
+            try self.svg_builder.finishNode();
         }
 
         pub fn drawCircle(self: *Self, cx: f32, cy: f32, r: f32, fill: []const u8) !void {
@@ -62,6 +73,13 @@ pub fn Visualizer(comptime Writer: type) type {
             const fill_val = fill orelse "none";
             try self.svg_builder.addAttribute("fill", fill_val);
             try self.svg_builder.addAttribute("stroke", stroke);
+            try self.svg_builder.addAttributeNum("stroke-width", self.stroke_width);
+
+            // FIXME: way too big
+            var buf: [100]u8 = undefined;
+            const transform = try std.fmt.bufPrint(&buf, "rotate({d} {d} {d})", .{ rect.rotation_deg, rect.cx(), rect.cy() });
+            try self.svg_builder.addAttribute("transform", transform);
+
             try self.svg_builder.finishNode();
         }
 
