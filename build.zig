@@ -99,6 +99,20 @@ fn setupBinarizationDebug(
     exe.linkLibC();
     b.installArtifact(exe);
 
+    const rotated_rect_test = b.addExecutable(.{
+        .name = "rotated-rect-test",
+        // In this case the main source file is merely a path, however, in more
+        // complicated build scripts, this could be a generated file.
+        .root_source_file = .{ .path = "src/binarization_debug/rotated_rect_test.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    rotated_rect_test.root_module.addImport("libqr", libqr);
+    rotated_rect_test.root_module.addAnonymousImport("resources", .{ .root_source_file = output });
+    rotated_rect_test.linkLibC();
+    b.installArtifact(rotated_rect_test);
+
     const unit_tests = b.addTest(.{
         .root_source_file = .{ .path = "src/binarization_debug/main.zig" },
         .target = target,

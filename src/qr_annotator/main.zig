@@ -178,10 +178,6 @@ fn visualize(alloc: Allocator, image: *img.Image, input_path: []const u8, output
 
     try visualizeFinderState(alloc, image, &visualizer);
 
-    if (true) {
-        return;
-    }
-
     var qr_code = try qr.QrCode.init(alloc, image);
     defer qr_code.deinit();
 
@@ -260,9 +256,6 @@ pub fn main() !void {
         try visualize(alloc, &image, args.input, output_dir);
     }
 
-    if (true) {
-        return;
-    }
     var qr_code = try qr.QrCode.init(alloc, &image);
     defer qr_code.deinit();
 

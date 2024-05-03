@@ -1,3 +1,8 @@
+pub const Point = struct {
+    x: f32,
+    y: f32,
+};
+
 pub fn Rect(comptime T: type) type {
     return struct {
         top: T,
